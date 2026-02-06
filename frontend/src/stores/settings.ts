@@ -1,11 +1,11 @@
 import { defineStore } from 'pinia'
-import { ref, onMounted } from 'vue'
-import { GetAuthStatus, GetModel, SetModel, AvailableModels, ReloadConfig } from '../../wailsjs/go/service/SettingsService'
+import { ref } from 'vue'
+import { GetAuthStatus, GetDefaultModel, SetDefaultModel, AvailableModels, ReloadConfig } from '../../wailsjs/go/service/SettingsService'
 import type { service } from '../../wailsjs/go/models'
 
 export const useSettingsStore = defineStore('settings', () => {
   const authStatus = ref<service.AuthStatus | null>(null)
-  const model = ref('gemini-2.5-flash')
+  const defaultModel = ref('gemini-2.5-flash')
   const availableModels = ref<string[]>([])
   const loading = ref(false)
 
@@ -17,13 +17,13 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
-  async function fetchModel() {
-    model.value = await GetModel()
+  async function fetchDefaultModel() {
+    defaultModel.value = await GetDefaultModel()
   }
 
-  async function changeModel(newModel: string) {
-    await SetModel(newModel)
-    model.value = newModel
+  async function changeDefaultModel(newModel: string) {
+    await SetDefaultModel(newModel)
+    defaultModel.value = newModel
   }
 
   async function fetchAvailableModels() {
@@ -43,18 +43,18 @@ export const useSettingsStore = defineStore('settings', () => {
   async function initialize() {
     await Promise.all([
       fetchAuthStatus(),
-      fetchModel(),
+      fetchDefaultModel(),
       fetchAvailableModels(),
     ])
   }
 
   return {
     authStatus,
-    model,
+    defaultModel,
     availableModels,
     loading,
     fetchAuthStatus,
-    changeModel,
+    changeDefaultModel,
     reloadConfig,
     initialize,
   }

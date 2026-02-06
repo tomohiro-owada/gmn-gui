@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { SendMessage, StopGeneration, ClearHistory, GetMessages } from '../../wailsjs/go/service/ChatService'
+import { SendMessage, StopGeneration, ClearHistory, GetMessages, GetModel, SetModel } from '../../wailsjs/go/service/ChatService'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import type { service } from '../../wailsjs/go/models'
 
@@ -16,6 +16,7 @@ export const useChatStore = defineStore('chat', () => {
   const streamingText = ref('')
   const isStreaming = ref(false)
   const error = ref<string | null>(null)
+  const sessionModel = ref('')
 
   function setupEvents() {
     EventsOn('chat:stream', (event: StreamEvent) => {
@@ -29,10 +30,8 @@ export const useChatStore = defineStore('chat', () => {
           streamingText.value += event.text || ''
           break
         case 'tool_call':
-          // Tool call display handled via messages update
           break
         case 'tool_result':
-          // Tool result display handled via messages update
           break
         case 'done':
           isStreaming.value = false
@@ -49,6 +48,15 @@ export const useChatStore = defineStore('chat', () => {
     EventsOn('chat:messages', (msgs: service.ChatMessage[]) => {
       messages.value = msgs
     })
+  }
+
+  async function fetchSessionModel() {
+    sessionModel.value = await GetModel()
+  }
+
+  async function changeSessionModel(model: string) {
+    await SetModel(model)
+    sessionModel.value = model
   }
 
   async function send(text: string) {
@@ -71,6 +79,8 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = []
     streamingText.value = ''
     error.value = null
+    sessionModel.value = ''
+    await fetchSessionModel()
   }
 
   async function loadMessages() {
@@ -82,7 +92,10 @@ export const useChatStore = defineStore('chat', () => {
     streamingText,
     isStreaming,
     error,
+    sessionModel,
     setupEvents,
+    fetchSessionModel,
+    changeSessionModel,
     send,
     stop,
     clear,

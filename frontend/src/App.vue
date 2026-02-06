@@ -17,6 +17,7 @@ onMounted(async () => {
 
   // Load initial data
   await settingsStore.initialize()
+  await chatStore.fetchSessionModel()
   await mcpStore.fetchServers()
 })
 
@@ -35,7 +36,7 @@ const navItems = [
     <aside class="w-56 border-r border-border flex flex-col bg-card">
       <div class="p-4 border-b border-border">
         <h1 class="text-lg font-bold tracking-tight">gmn-gui</h1>
-        <p class="text-xs text-muted-foreground mt-0.5">{{ settingsStore.model }}</p>
+        <p class="text-xs text-muted-foreground mt-0.5">{{ chatStore.sessionModel }}</p>
       </div>
       <nav class="flex-1 p-2 space-y-0.5">
         <router-link

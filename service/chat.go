@@ -39,6 +39,7 @@ type ChatService struct {
 	// Conversation state
 	messages []ChatMessage  // UI display messages
 	history  []api.Content  // API request history
+	model    string         // Per-session model (overrides default)
 	cancel   context.CancelFunc
 }
 
@@ -48,6 +49,23 @@ func NewChatService(settings *SettingsService, mcp *MCPManager) *ChatService {
 		settings: settings,
 		mcp:      mcp,
 	}
+}
+
+// GetModel returns the current session model
+func (c *ChatService) GetModel() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.model != "" {
+		return c.model
+	}
+	return c.settings.GetDefaultModel()
+}
+
+// SetModel sets the model for the current session
+func (c *ChatService) SetModel(model string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.model = model
 }
 
 // SetContext sets the Wails runtime context
@@ -93,12 +111,13 @@ func (c *ChatService) StopGeneration() {
 	}
 }
 
-// ClearHistory clears all conversation history
+// ClearHistory clears all conversation history and resets to default model
 func (c *ChatService) ClearHistory() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.messages = nil
 	c.history = nil
+	c.model = ""
 	runtime.EventsEmit(c.ctx, "chat:messages", []ChatMessage{})
 }
 
@@ -152,7 +171,7 @@ func (c *ChatService) doStream(ctx context.Context, client *api.Client) {
 	c.mu.Unlock()
 
 	req := &api.GenerateRequest{
-		Model:   c.settings.GetModel(),
+		Model:   c.GetModel(),
 		Project: c.settings.GetProjectID(),
 		Request: api.InnerRequest{
 			Contents: historyCopy,

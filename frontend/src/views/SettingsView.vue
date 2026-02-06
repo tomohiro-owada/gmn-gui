@@ -11,14 +11,15 @@ const chatStore = useChatStore()
     <h2 class="text-xl font-bold mb-6">Settings</h2>
 
     <div class="space-y-4 max-w-md">
-      <!-- Model Selection -->
+      <!-- Default Model -->
       <div>
-        <label class="block text-sm font-medium mb-1.5">Model</label>
+        <label class="block text-sm font-medium mb-1.5">Default Model</label>
+        <p class="text-xs text-muted-foreground mb-1.5">New chats will start with this model</p>
         <select
-          :value="settingsStore.model"
+          :value="settingsStore.defaultModel"
           class="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm
                  focus:outline-none focus:ring-2 focus:ring-ring"
-          @change="settingsStore.changeModel(($event.target as HTMLSelectElement).value)"
+          @change="settingsStore.changeDefaultModel(($event.target as HTMLSelectElement).value)"
         >
           <option v-for="m in settingsStore.availableModels" :key="m" :value="m">
             {{ m }}

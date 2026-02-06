@@ -33,6 +33,29 @@ async function handleSend(text: string) {
 
 <template>
   <div class="flex-1 flex flex-col h-full">
+    <!-- Header with session model selector -->
+    <div class="flex items-center justify-between px-4 py-2 border-b border-border bg-card">
+      <div class="flex items-center gap-2">
+        <span class="text-sm font-medium">Chat</span>
+        <button
+          class="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          @click="chatStore.clear()"
+        >
+          New
+        </button>
+      </div>
+      <select
+        :value="chatStore.sessionModel"
+        class="rounded border border-input bg-background px-2 py-1 text-xs
+               focus:outline-none focus:ring-1 focus:ring-ring"
+        @change="chatStore.changeSessionModel(($event.target as HTMLSelectElement).value)"
+      >
+        <option v-for="m in settingsStore.availableModels" :key="m" :value="m">
+          {{ m }}
+        </option>
+      </select>
+    </div>
+
     <!-- Messages area -->
     <div ref="messagesContainer" class="flex-1 overflow-y-auto p-4 space-y-4">
       <!-- Empty state -->
@@ -46,7 +69,7 @@ async function handleSend(text: string) {
             Start a conversation with Gemini
           </p>
           <p class="text-xs text-muted-foreground">
-            Model: {{ settingsStore.model }}
+            Model: {{ chatStore.sessionModel }}
           </p>
         </div>
       </div>

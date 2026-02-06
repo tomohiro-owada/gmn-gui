@@ -158,25 +158,27 @@ func (s *SettingsService) ReloadConfig() error {
 	return nil
 }
 
-// GetModel returns the current model
-func (s *SettingsService) GetModel() string {
+// GetDefaultModel returns the default model for new sessions
+func (s *SettingsService) GetDefaultModel() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.model
 }
 
-// SetModel sets the model
-func (s *SettingsService) SetModel(model string) {
+// SetDefaultModel sets the default model for new sessions
+func (s *SettingsService) SetDefaultModel(model string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.model = model
 }
 
-// AvailableModels returns the list of available models
+// AvailableModels returns the list of available models (upstream-aligned)
 func (s *SettingsService) AvailableModels() []string {
 	return []string{
+		"gemini-3-pro-preview",
+		"gemini-3-flash-preview",
 		"gemini-2.5-pro",
 		"gemini-2.5-flash",
-		"gemini-2.0-flash",
+		"gemini-2.5-flash-lite",
 	}
 }
