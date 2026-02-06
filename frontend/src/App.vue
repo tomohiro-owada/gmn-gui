@@ -31,7 +31,7 @@ const navItems = [
 </script>
 
 <template>
-  <div class="flex h-screen bg-background text-foreground dark">
+  <div class="flex h-screen bg-background text-foreground">
     <!-- Sidebar -->
     <aside class="w-56 border-r border-border flex flex-col bg-card">
       <div class="p-4 border-b border-border">
