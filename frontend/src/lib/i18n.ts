@@ -2,7 +2,19 @@ import { ref, computed } from 'vue'
 
 export type Locale = 'en' | 'ja'
 
-const currentLocale = ref<Locale>('en')
+function detectSystemLocale(): Locale {
+  const saved = localStorage.getItem('gmn-gui-locale') as Locale | null
+  if (saved && (saved === 'en' || saved === 'ja')) {
+    return saved
+  }
+  const navLang = navigator.language.toLowerCase()
+  if (navLang.startsWith('ja')) {
+    return 'ja'
+  }
+  return 'en'
+}
+
+const currentLocale = ref<Locale>(detectSystemLocale())
 
 const messages: Record<Locale, Record<string, string>> = {
   en: {
@@ -30,6 +42,8 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.notAuthenticated': 'Not authenticated',
     'settings.project': 'Project',
     'settings.reloadConfig': 'Reload Config',
+    'settings.primaryColor': 'Accent Color',
+    'settings.primaryColorDesc': 'Choose a color for buttons and highlights',
     'settings.clearHistory': 'Clear Chat History',
     'mcp.title': 'MCP Servers',
     'mcp.refresh': 'Refresh',
@@ -43,6 +57,9 @@ const messages: Record<Locale, Record<string, string>> = {
     'launcher.noProjects': 'No recent projects',
     'launcher.sessions': 'sessions',
     'launcher.open': 'Open',
+    'launcher.login': 'Sign in with Google',
+    'launcher.loggingIn': 'Signing in...',
+    'launcher.logout': 'Sign out',
   },
   ja: {
     'sidebar.selectDir': 'ディレクトリを選択...',
@@ -69,6 +86,8 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.notAuthenticated': '未認証',
     'settings.project': 'プロジェクト',
     'settings.reloadConfig': '設定を再読み込み',
+    'settings.primaryColor': 'アクセントカラー',
+    'settings.primaryColorDesc': 'ボタンやハイライトの色を選択',
     'settings.clearHistory': 'チャット履歴をクリア',
     'mcp.title': 'MCPサーバー',
     'mcp.refresh': '更新',
@@ -82,6 +101,9 @@ const messages: Record<Locale, Record<string, string>> = {
     'launcher.noProjects': 'プロジェクトがありません',
     'launcher.sessions': 'セッション',
     'launcher.open': '開く',
+    'launcher.login': 'Googleでログイン',
+    'launcher.loggingIn': 'ログイン中...',
+    'launcher.logout': 'サインアウト',
   },
 }
 

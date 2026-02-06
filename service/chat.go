@@ -29,6 +29,20 @@ type ChatStreamEvent struct {
 	ToolArgs string `json:"toolArgs,omitempty"`
 }
 
+// AskUserQuestion represents a question sent to the user via ask_user tool
+type AskUserQuestion struct {
+	Question string            `json:"question"`
+	Header   string            `json:"header"`
+	Type     string            `json:"type"` // "choice" | "text" | "yesno"
+	Options  []AskUserOption   `json:"options,omitempty"`
+}
+
+// AskUserOption represents a choice option
+type AskUserOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
 // ChatService handles multi-turn conversation with streaming
 type ChatService struct {
 	ctx      context.Context
@@ -42,6 +56,12 @@ type ChatService struct {
 	model    string         // Per-session model (overrides default)
 	workDir  string         // Working directory for this session
 	cancel   context.CancelFunc
+
+	// ask_user channel
+	askUserCh chan string
+
+	// Plan mode
+	planMode bool
 }
 
 // NewChatService creates a new chat service
@@ -83,6 +103,37 @@ func (c *ChatService) SetWorkDir(dir string) {
 	c.workDir = dir
 }
 
+// GetPlanMode returns whether plan mode is active
+func (c *ChatService) GetPlanMode() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.planMode
+}
+
+// SetPlanMode toggles plan mode (read-only tools only)
+func (c *ChatService) SetPlanMode(enabled bool) {
+	c.mu.Lock()
+	prev := c.planMode
+	c.planMode = enabled
+	hasHistory := len(c.history) > 0
+
+	// Inject a notice into conversation history so the model knows the mode changed
+	if hasHistory {
+		if enabled && !prev {
+			c.history = append(c.history, api.Content{
+				Role:  "user",
+				Parts: []api.Part{{Text: "[SYSTEM: Plan Mode has been ACTIVATED. From now on, only use read-only tools. Do NOT modify any files. Explain your plan instead of executing changes.]"}},
+			})
+		} else if !enabled && prev {
+			c.history = append(c.history, api.Content{
+				Role:  "user",
+				Parts: []api.Part{{Text: "[SYSTEM: Plan Mode has been DEACTIVATED. All tools are now available. You may freely use write_file, replace, run_shell_command, and any other tools to make changes as requested.]"}},
+			})
+		}
+	}
+	c.mu.Unlock()
+}
+
 // SetContext sets the Wails runtime context
 func (c *ChatService) SetContext(ctx context.Context) {
 	c.ctx = ctx
@@ -100,6 +151,7 @@ func (c *ChatService) SendMessage(text string) error {
 		Timestamp: time.Now(),
 	}
 	c.messages = append(c.messages, userMsg)
+
 	c.history = append(c.history, api.Content{
 		Role:  "user",
 		Parts: []api.Part{{Text: text}},
@@ -146,6 +198,41 @@ func (c *ChatService) GetMessages() []ChatMessage {
 	return result
 }
 
+// AskUser sends questions to the frontend and blocks until the user responds
+func (c *ChatService) AskUser(ctx context.Context, questions []AskUserQuestion) (string, error) {
+	c.mu.Lock()
+	c.askUserCh = make(chan string, 1)
+	c.mu.Unlock()
+
+	defer func() {
+		c.mu.Lock()
+		c.askUserCh = nil
+		c.mu.Unlock()
+	}()
+
+	// Emit event to frontend
+	runtime.EventsEmit(c.ctx, "chat:ask_user", questions)
+
+	// Wait for user response or cancellation
+	select {
+	case <-ctx.Done():
+		return "User cancelled the question.", nil
+	case answer := <-c.askUserCh:
+		return answer, nil
+	}
+}
+
+// SubmitAskUserResponse is called from the frontend when the user answers
+func (c *ChatService) SubmitAskUserResponse(answer string) {
+	c.mu.Lock()
+	ch := c.askUserCh
+	c.mu.Unlock()
+
+	if ch != nil {
+		ch <- answer
+	}
+}
+
 func (c *ChatService) streamResponse() {
 	ctx, cancel := context.WithCancel(c.ctx)
 	c.mu.Lock()
@@ -173,11 +260,20 @@ func (c *ChatService) streamResponse() {
 }
 
 func (c *ChatService) doStream(ctx context.Context, client *api.Client) {
-	// Build tools from MCP
+	inPlanMode := c.GetPlanMode()
+
+	// Build tools: built-in + MCP (filtered in plan mode)
+	var allDecls []api.FunctionDecl
+	if inPlanMode {
+		allDecls = PlanModeToolDeclarations()
+	} else {
+		allDecls = BuiltinToolDeclarations()
+		mcpTools := c.mcp.GetAllTools()
+		allDecls = append(allDecls, mcpTools...)
+	}
 	var tools []api.Tool
-	mcpTools := c.mcp.GetAllTools()
-	if len(mcpTools) > 0 {
-		tools = []api.Tool{{FunctionDeclarations: mcpTools}}
+	if len(allDecls) > 0 {
+		tools = []api.Tool{{FunctionDeclarations: allDecls}}
 	}
 
 	// Build request
@@ -186,12 +282,22 @@ func (c *ChatService) doStream(ctx context.Context, client *api.Client) {
 	copy(historyCopy, c.history)
 	c.mu.Unlock()
 
+	// Build system instruction with environment context
+	systemPrompt := BuildSystemPrompt(c.GetWorkDir())
+	if inPlanMode {
+		systemPrompt += "\n\n## PLAN MODE ACTIVE\nYou are in Plan Mode. Only use read-only tools to explore the codebase and design an implementation plan. Do NOT make any changes to files. Present your plan to the user for approval before proceeding."
+	}
+	systemInstruction := &api.Content{
+		Parts: []api.Part{{Text: systemPrompt}},
+	}
+
 	req := &api.GenerateRequest{
 		Model:   c.GetModel(),
 		Project: c.settings.GetProjectID(),
 		Request: api.InnerRequest{
-			Contents: historyCopy,
-			Tools:    tools,
+			Contents:          historyCopy,
+			SystemInstruction: systemInstruction,
+			Tools:             tools,
 		},
 	}
 
@@ -208,10 +314,14 @@ func (c *ChatService) doStream(ctx context.Context, client *api.Client) {
 	runtime.EventsEmit(c.ctx, "chat:stream", ChatStreamEvent{Type: "start"})
 
 	var fullText string
-	var pendingToolCalls []*api.FunctionCall
+	var thoughtText string
+	var pendingToolParts []api.Part
 
 	for event := range events {
 		switch event.Type {
+		case "thought":
+			thoughtText += event.Text
+
 		case "content":
 			fullText += event.Text
 			runtime.EventsEmit(c.ctx, "chat:stream", ChatStreamEvent{
@@ -220,7 +330,10 @@ func (c *ChatService) doStream(ctx context.Context, client *api.Client) {
 			})
 
 		case "tool_call":
-			pendingToolCalls = append(pendingToolCalls, event.ToolCall)
+			pendingToolParts = append(pendingToolParts, api.Part{
+				FunctionCall:     event.ToolCall,
+				ThoughtSignature: event.ThoughtSignature,
+			})
 			argsJSON, _ := json.Marshal(event.ToolCall.Args)
 			runtime.EventsEmit(c.ctx, "chat:stream", ChatStreamEvent{
 				Type:     "tool_call",
@@ -251,14 +364,15 @@ func (c *ChatService) doStream(ctx context.Context, client *api.Client) {
 		})
 	}
 
-	// Build model parts for API history
+	// Build model parts for API history (preserve thought + thoughtSignature)
 	var modelParts []api.Part
+	if thoughtText != "" {
+		modelParts = append(modelParts, api.Part{Thought: true, Text: thoughtText})
+	}
 	if fullText != "" {
 		modelParts = append(modelParts, api.Part{Text: fullText})
 	}
-	for _, tc := range pendingToolCalls {
-		modelParts = append(modelParts, api.Part{FunctionCall: tc})
-	}
+	modelParts = append(modelParts, pendingToolParts...)
 	if len(modelParts) > 0 {
 		c.history = append(c.history, api.Content{
 			Role:  "model",
@@ -268,8 +382,8 @@ func (c *ChatService) doStream(ctx context.Context, client *api.Client) {
 	c.mu.Unlock()
 
 	// Handle tool calls if any
-	if len(pendingToolCalls) > 0 {
-		c.handleToolCalls(ctx, client, pendingToolCalls)
+	if len(pendingToolParts) > 0 {
+		c.handleToolCalls(ctx, client, pendingToolParts)
 		return
 	}
 
@@ -277,10 +391,15 @@ func (c *ChatService) doStream(ctx context.Context, client *api.Client) {
 	runtime.EventsEmit(c.ctx, "chat:messages", c.GetMessages())
 }
 
-func (c *ChatService) handleToolCalls(ctx context.Context, client *api.Client, toolCalls []*api.FunctionCall) {
-	var toolParts []api.Part
+func (c *ChatService) handleToolCalls(ctx context.Context, client *api.Client, toolCallParts []api.Part) {
+	var toolRespParts []api.Part
 
-	for _, tc := range toolCalls {
+	for _, part := range toolCallParts {
+		tc := part.FunctionCall
+		if tc == nil {
+			continue
+		}
+
 		// Add tool call message to UI
 		argsJSON, _ := json.Marshal(tc.Args)
 		c.mu.Lock()
@@ -294,8 +413,18 @@ func (c *ChatService) handleToolCalls(ctx context.Context, client *api.Client, t
 		})
 		c.mu.Unlock()
 
-		// Execute tool via MCPManager
-		result, err := c.mcp.CallTool(ctx, tc.Name, tc.Args)
+		// Plan mode guard: reject non-read-only tools
+		var result string
+		var err error
+		if c.GetPlanMode() && !IsPlanModeTool(tc.Name) {
+			result = fmt.Sprintf("Error: tool %q is not allowed in Plan Mode. Only read-only tools are available.", tc.Name)
+		} else if tc.Name == "ask_user" {
+			result, err = c.execAskUser(ctx, tc.Args)
+		} else if IsBuiltinTool(tc.Name) {
+			result, err = ExecuteBuiltinTool(ctx, c.GetWorkDir(), tc.Name, tc.Args)
+		} else {
+			result, err = c.mcp.CallTool(ctx, tc.Name, tc.Args)
+		}
 		if err != nil {
 			result = fmt.Sprintf("Error: %v", err)
 		}
@@ -318,7 +447,7 @@ func (c *ChatService) handleToolCalls(ctx context.Context, client *api.Client, t
 		c.mu.Unlock()
 
 		// Build function response for API
-		toolParts = append(toolParts, api.Part{
+		toolRespParts = append(toolRespParts, api.Part{
 			FunctionResp: &api.FunctionResp{
 				Name:     tc.Name,
 				Response: map[string]interface{}{"result": result},
@@ -330,7 +459,7 @@ func (c *ChatService) handleToolCalls(ctx context.Context, client *api.Client, t
 	c.mu.Lock()
 	c.history = append(c.history, api.Content{
 		Role:  "user",
-		Parts: toolParts,
+		Parts: toolRespParts,
 	})
 	c.mu.Unlock()
 
@@ -338,4 +467,50 @@ func (c *ChatService) handleToolCalls(ctx context.Context, client *api.Client, t
 
 	// Continue the conversation with tool results
 	c.doStream(ctx, client)
+}
+
+func (c *ChatService) execAskUser(ctx context.Context, args map[string]interface{}) (string, error) {
+	questionsRaw, ok := args["questions"].([]interface{})
+	if !ok || len(questionsRaw) == 0 {
+		// Fallback: single question string
+		if q, ok := args["question"].(string); ok && q != "" {
+			questionsRaw = []interface{}{map[string]interface{}{"question": q, "header": "Question", "type": "text"}}
+		} else {
+			return "", fmt.Errorf("questions array is required")
+		}
+	}
+
+	var questions []AskUserQuestion
+	for _, qRaw := range questionsRaw {
+		qMap, ok := qRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		q := AskUserQuestion{
+			Question: stringVal(qMap, "question"),
+			Header:   stringVal(qMap, "header"),
+			Type:     stringVal(qMap, "type"),
+		}
+		if q.Type == "" {
+			q.Type = "text"
+		}
+		if opts, ok := qMap["options"].([]interface{}); ok {
+			for _, oRaw := range opts {
+				if oMap, ok := oRaw.(map[string]interface{}); ok {
+					q.Options = append(q.Options, AskUserOption{
+						Label:       stringVal(oMap, "label"),
+						Description: stringVal(oMap, "description"),
+					})
+				}
+			}
+		}
+		questions = append(questions, q)
+	}
+
+	return c.AskUser(ctx, questions)
+}
+
+func stringVal(m map[string]interface{}, key string) string {
+	v, _ := m[key].(string)
+	return v
 }

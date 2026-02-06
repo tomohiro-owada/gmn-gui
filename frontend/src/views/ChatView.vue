@@ -7,6 +7,7 @@ import { useI18n } from '../lib/i18n'
 import ChatInput from '../components/chat/ChatInput.vue'
 import MessageBubble from '../components/chat/MessageBubble.vue'
 import StreamingText from '../components/chat/StreamingText.vue'
+import AskUserDialog from '../components/chat/AskUserDialog.vue'
 
 const chatStore = useChatStore()
 const settingsStore = useSettingsStore()
@@ -54,20 +55,44 @@ function shortenPath(path: string): string {
         <span class="truncate">{{ shortenPath(chatStore.workDir) }}</span>
       </div>
 
-      <!-- Center: model selector -->
-      <select
-        :value="chatStore.sessionModel"
-        class="rounded border border-input bg-background px-2 py-1 text-xs
-               focus:outline-none focus:ring-1 focus:ring-ring"
-        @change="chatStore.changeSessionModel(($event.target as HTMLSelectElement).value)"
-      >
-        <option v-for="m in settingsStore.availableModels" :key="m" :value="m">
-          {{ m }}
-        </option>
-      </select>
-
-      <!-- Right: MCP + Settings icons -->
+      <!-- Right: model selector + font size + MCP + Settings icons -->
       <div class="flex items-center gap-1">
+        <select
+          :value="chatStore.sessionModel"
+          class="rounded border border-input bg-background px-2 py-1 text-xs
+                 focus:outline-none focus:ring-1 focus:ring-ring"
+          @change="chatStore.changeSessionModel(($event.target as HTMLSelectElement).value)"
+        >
+          <option v-for="m in settingsStore.availableModels" :key="m" :value="m">
+            {{ m }}
+          </option>
+        </select>
+        <div class="w-px h-4 bg-border mx-0.5" />
+        <button
+          class="px-2 py-1 rounded-md text-xs font-medium transition-colors"
+          :class="chatStore.planMode
+            ? 'bg-amber-500/20 text-amber-600 border border-amber-500/40'
+            : 'text-muted-foreground hover:text-foreground hover:bg-accent border border-transparent'"
+          title="Plan Mode: read-only tools only"
+          @click="chatStore.togglePlanMode()"
+        >Plan</button>
+        <div class="w-px h-4 bg-border mx-0.5" />
+        <button
+          class="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors text-xs font-mono leading-none"
+          title="Decrease font size"
+          @click="settingsStore.decreaseFontSize()"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
+        </button>
+        <span class="text-[10px] text-muted-foreground tabular-nums w-5 text-center">{{ settingsStore.fontSize }}</span>
+        <button
+          class="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors text-xs font-mono leading-none"
+          title="Increase font size"
+          @click="settingsStore.increaseFontSize()"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+        </button>
+        <div class="w-px h-4 bg-border mx-0.5" />
         <router-link
           to="/mcp"
           class="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
@@ -76,19 +101,12 @@ function shortenPath(path: string): string {
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
         </router-link>
-        <router-link
-          to="/settings"
-          class="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          :class="route.path === '/settings' ? 'bg-accent text-foreground' : ''"
-          title="Settings"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-        </router-link>
       </div>
     </div>
 
     <!-- Messages area -->
-    <div ref="messagesContainer" class="flex-1 overflow-y-auto p-4 space-y-4">
+    <div ref="messagesContainer" class="flex-1 overflow-y-auto p-4" :style="{ fontSize: settingsStore.fontSize + 'px' }">
+      <div class="max-w-[768px] mx-auto space-y-4">
       <!-- Empty state -->
       <div
         v-if="chatStore.messages.length === 0 && !chatStore.isStreaming"
@@ -131,6 +149,7 @@ function shortenPath(path: string): string {
       >
         {{ chatStore.error }}
       </div>
+      </div>
     </div>
 
     <!-- Input area -->
@@ -139,6 +158,13 @@ function shortenPath(path: string): string {
       :is-streaming="chatStore.isStreaming"
       @send="handleSend"
       @stop="chatStore.stop"
+    />
+
+    <!-- Ask User Dialog -->
+    <AskUserDialog
+      :questions="chatStore.askUserQuestions"
+      :visible="chatStore.askUserVisible"
+      @done="chatStore.askUserVisible = false"
     />
   </div>
 </template>

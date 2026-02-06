@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { SendMessage, StopGeneration, ClearHistory, GetMessages, GetModel, SetModel, GetWorkDir, SetWorkDir } from '../../wailsjs/go/service/ChatService'
+import { SendMessage, StopGeneration, ClearHistory, GetMessages, GetModel, SetModel, GetWorkDir, SetWorkDir, SubmitAskUserResponse, GetPlanMode, SetPlanMode } from '../../wailsjs/go/service/ChatService'
 import { SaveCurrentSession } from '../../wailsjs/go/service/SessionService'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import type { service } from '../../wailsjs/go/models'
@@ -22,6 +22,13 @@ export const useChatStore = defineStore('chat', () => {
   const error = ref<string | null>(null)
   const sessionModel = ref('')
   const workDir = ref('')
+
+  // ask_user dialog state
+  const askUserVisible = ref(false)
+  const askUserQuestions = ref<any[]>([])
+
+  // plan mode
+  const planMode = ref(false)
 
   function setAutoSaveCallback(cb: () => string | null) {
     autoSaveSessionId = cb
@@ -62,6 +69,17 @@ export const useChatStore = defineStore('chat', () => {
     EventsOn('chat:messages', (msgs: service.ChatMessage[]) => {
       messages.value = msgs ?? []
     })
+
+    EventsOn('chat:ask_user', (questions: any[]) => {
+      askUserQuestions.value = questions
+      askUserVisible.value = true
+    })
+  }
+
+  async function submitAskUserAnswer(answer: string) {
+    askUserVisible.value = false
+    askUserQuestions.value = []
+    await SubmitAskUserResponse(answer)
   }
 
   async function fetchSessionModel() {
@@ -85,10 +103,13 @@ export const useChatStore = defineStore('chat', () => {
   async function send(text: string) {
     if (!text.trim() || isStreaming.value) return
     error.value = null
+    isStreaming.value = true
+    streamingText.value = ''
     try {
       await SendMessage(text)
     } catch (e) {
       error.value = String(e)
+      isStreaming.value = false
     }
   }
 
@@ -111,6 +132,16 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = await GetMessages()
   }
 
+  async function fetchPlanMode() {
+    planMode.value = await GetPlanMode()
+  }
+
+  async function togglePlanMode() {
+    const next = !planMode.value
+    await SetPlanMode(next)
+    planMode.value = next
+  }
+
   return {
     messages,
     streamingText,
@@ -118,6 +149,9 @@ export const useChatStore = defineStore('chat', () => {
     error,
     sessionModel,
     workDir,
+    askUserVisible,
+    askUserQuestions,
+    planMode,
     setupEvents,
     setAutoSaveCallback,
     fetchSessionModel,
@@ -128,5 +162,8 @@ export const useChatStore = defineStore('chat', () => {
     stop,
     clear,
     loadMessages,
+    submitAskUserAnswer,
+    fetchPlanMode,
+    togglePlanMode,
   }
 })

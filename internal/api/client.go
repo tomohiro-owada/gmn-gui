@@ -12,13 +12,40 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const (
 	// Code Assist API endpoint (same as official Gemini CLI)
 	baseURL    = "https://cloudcode-pa.googleapis.com"
 	apiVersion = "v1internal"
+
+	maxRetries = 3
 )
+
+// parseRetryDelay extracts retryDelay from a 429 response body.
+// Response format: {"error":{"details":[{"@type":"...RetryInfo","retryDelay":"0.42s"}]}}
+func parseRetryDelay(body []byte) time.Duration {
+	var errResp struct {
+		Error struct {
+			Details []struct {
+				Type       string `json:"@type"`
+				RetryDelay string `json:"retryDelay"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &errResp) != nil {
+		return time.Second
+	}
+	for _, d := range errResp.Error.Details {
+		if strings.HasSuffix(d.Type, "RetryInfo") && d.RetryDelay != "" {
+			if dur, err := time.ParseDuration(d.RetryDelay); err == nil {
+				return dur
+			}
+		}
+	}
+	return time.Second
+}
 
 // Client is a Gemini API client
 type Client struct {
@@ -44,9 +71,10 @@ type GenerateRequest struct {
 
 // InnerRequest is the inner request structure for Code Assist API
 type InnerRequest struct {
-	Contents []Content        `json:"contents"`
-	Config   GenerationConfig `json:"generationConfig,omitempty"`
-	Tools    []Tool           `json:"tools,omitempty"`
+	Contents          []Content        `json:"contents"`
+	SystemInstruction *Content         `json:"systemInstruction,omitempty"`
+	Config            GenerationConfig `json:"generationConfig,omitempty"`
+	Tools             []Tool           `json:"tools,omitempty"`
 }
 
 // Content represents a message content
@@ -57,9 +85,11 @@ type Content struct {
 
 // Part represents a content part
 type Part struct {
-	Text         string        `json:"text,omitempty"`
-	FunctionCall *FunctionCall `json:"functionCall,omitempty"`
-	FunctionResp *FunctionResp `json:"functionResponse,omitempty"`
+	Text             string        `json:"text,omitempty"`
+	Thought          bool          `json:"thought,omitempty"`
+	ThoughtSignature string        `json:"thoughtSignature,omitempty"`
+	FunctionCall     *FunctionCall `json:"functionCall,omitempty"`
+	FunctionResp     *FunctionResp `json:"functionResponse,omitempty"`
 }
 
 // FunctionCall represents a tool call
@@ -128,40 +158,60 @@ func (c *Client) Generate(ctx context.Context, req *GenerateRequest) (*GenerateR
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
+		resp, err := c.httpClient.Do(httpReq)
+		if err != nil {
+			return nil, fmt.Errorf("failed to send request: %w", err)
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(bodyBytes))
+		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxRetries {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			wait := parseRetryDelay(bodyBytes)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(wait):
+				continue
+			}
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(bodyBytes))
+		}
+
+		var result GenerateResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close()
+			return nil, fmt.Errorf("failed to decode response: %w", err)
+		}
+		resp.Body.Close()
+
+		return &result, nil
 	}
 
-	var result GenerateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return &result, nil
+	return nil, fmt.Errorf("max retries exceeded")
 }
 
 // StreamEvent represents a streaming event
 type StreamEvent struct {
-	Type       string         `json:"type"`
-	Model      string         `json:"model,omitempty"`
-	Text       string         `json:"text,omitempty"`
-	ToolCall   *FunctionCall  `json:"tool_call,omitempty"`
-	ToolResult *ToolResult    `json:"tool_result,omitempty"`
-	Usage      *UsageMetadata `json:"usage,omitempty"`
-	Error      string         `json:"error,omitempty"`
+	Type             string         `json:"type"`
+	Model            string         `json:"model,omitempty"`
+	Text             string         `json:"text,omitempty"`
+	Thought          bool           `json:"thought,omitempty"`
+	ToolCall         *FunctionCall  `json:"tool_call,omitempty"`
+	ThoughtSignature string         `json:"thought_signature,omitempty"`
+	ToolResult       *ToolResult    `json:"tool_result,omitempty"`
+	Usage            *UsageMetadata `json:"usage,omitempty"`
+	Error            string         `json:"error,omitempty"`
 }
 
 // ToolResult represents a tool execution result
@@ -257,22 +307,38 @@ func (c *Client) GenerateStream(ctx context.Context, req *GenerateRequest) (<-ch
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "text/event-stream")
+	var resp *http.Response
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Accept", "text/event-stream")
 
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
+		resp, err = c.httpClient.Do(httpReq)
+		if err != nil {
+			return nil, fmt.Errorf("failed to send request: %w", err)
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(bodyBytes))
+		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxRetries {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			wait := parseRetryDelay(bodyBytes)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(wait):
+				continue
+			}
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(bodyBytes))
+		}
+		break
 	}
 
 	events := make(chan StreamEvent)
@@ -320,10 +386,18 @@ func (c *Client) GenerateStream(ctx context.Context, req *GenerateRequest) (<-ch
 			for _, candidate := range chunk.Response.Candidates {
 				for _, part := range candidate.Content.Parts {
 					if part.Text != "" {
-						events <- StreamEvent{Type: "content", Text: part.Text}
+						if part.Thought {
+							events <- StreamEvent{Type: "thought", Text: part.Text, Thought: true}
+						} else {
+							events <- StreamEvent{Type: "content", Text: part.Text}
+						}
 					}
 					if part.FunctionCall != nil {
-						events <- StreamEvent{Type: "tool_call", ToolCall: part.FunctionCall}
+						events <- StreamEvent{
+							Type:             "tool_call",
+							ToolCall:         part.FunctionCall,
+							ThoughtSignature: part.ThoughtSignature,
+						}
 					}
 				}
 			}

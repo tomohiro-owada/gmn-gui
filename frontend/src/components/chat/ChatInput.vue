@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { useI18n } from '../../lib/i18n'
 
 const { t } = useI18n()
@@ -16,10 +16,20 @@ const emit = defineEmits<{
 
 const inputText = ref('')
 const isComposing = ref(false)
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
+
+function autoResize() {
+  const el = textareaRef.value
+  if (!el) return
+  el.style.height = 'auto'
+  // Line height ~1.5 * fontSize(~14px) = ~21px, 5 lines ≈ 105px + padding
+  const maxHeight = 5 * 21 + 12
+  el.style.height = Math.min(el.scrollHeight, maxHeight) + 'px'
+}
+
+watch(inputText, () => nextTick(autoResize))
 
 function handleKeydown(e: KeyboardEvent) {
-  // Don't send during IME composition (e.g. Japanese input)
-  // Check both native isComposing and our ref, plus keyCode 229 (composition)
   if (e.isComposing || isComposing.value || e.keyCode === 229) return
 
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -29,7 +39,6 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 function handleCompositionEnd() {
-  // Delay clearing so the final Enter keydown is still blocked
   setTimeout(() => { isComposing.value = false }, 50)
 }
 
@@ -38,6 +47,7 @@ function send() {
   if (!text || props.disabled) return
   emit('send', text)
   inputText.value = ''
+  nextTick(autoResize)
 }
 </script>
 
@@ -46,13 +56,14 @@ function send() {
     <div class="flex items-end gap-2 max-w-3xl mx-auto">
       <div class="flex-1 relative">
         <textarea
+          ref="textareaRef"
           v-model="inputText"
           :disabled="disabled"
           :placeholder="t('chat.placeholder')"
           rows="1"
-          class="w-full resize-none rounded-lg border border-input bg-background px-3 py-2.5 text-sm
+          class="w-full resize-none rounded-lg border border-input bg-background px-3 py-2.5
                  placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring
-                 disabled:opacity-50 max-h-32 overflow-y-auto"
+                 disabled:opacity-50 overflow-y-auto"
           @keydown="handleKeydown"
           @compositionstart="isComposing = true"
           @compositionend="handleCompositionEnd"

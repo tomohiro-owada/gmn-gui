@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import { ListRecentWorkDirs } from '../../wailsjs/go/service/SessionService'
+import { ListRecentWorkDirs, DeleteSession } from '../../wailsjs/go/service/SessionService'
 import { OpenProject, SelectDirectory } from '../../wailsjs/go/main/LauncherApp'
 import type { service } from '../../wailsjs/go/models'
 
@@ -28,5 +28,14 @@ export const useLauncherStore = defineStore('launcher', () => {
     }
   }
 
-  return { projects, loading, fetchProjects, openProject, selectNewProject }
+  async function deleteProject(dir: string) {
+    const project = projects.value.find(p => p.path === dir)
+    if (!project?.sessions) return
+    for (const s of project.sessions) {
+      await DeleteSession(s.id)
+    }
+    await fetchProjects()
+  }
+
+  return { projects, loading, fetchProjects, openProject, selectNewProject, deleteProject }
 })

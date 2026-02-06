@@ -187,37 +187,91 @@ func (m *MCPManager) GetAllTools() []api.FunctionDecl {
 	var tools []api.FunctionDecl
 	for serverName, client := range m.clients {
 		for _, tool := range client.Tools {
+			params := sanitizeSchemaRaw(tool.InputSchema)
+			// Sanitize name: Gemini API only allows [a-zA-Z0-9_]
+			safeName := sanitizeToolName(serverName) + "__" + sanitizeToolName(tool.Name)
 			tools = append(tools, api.FunctionDecl{
-				Name:        serverName + "__" + tool.Name,
+				Name:        safeName,
 				Description: tool.Description,
-				Parameters:  tool.InputSchema,
+				Parameters:  params,
 			})
 		}
 	}
 	return tools
 }
 
+// sanitizeToolName replaces characters not allowed in Gemini API function names with underscores.
+func sanitizeToolName(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
+}
+
+// sanitizeSchemaRaw removes fields like $schema from a JSON schema (json.RawMessage).
+func sanitizeSchemaRaw(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return raw
+	}
+	sanitizeMap(m)
+	out, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+func sanitizeMap(m map[string]interface{}) {
+	delete(m, "$schema")
+	for _, v := range m {
+		if nested, ok := v.(map[string]interface{}); ok {
+			sanitizeMap(nested)
+		}
+	}
+}
+
 // CallTool calls a tool on the appropriate MCP server.
 // The toolName should be prefixed with the server name (e.g. "myserver__toolname").
 func (m *MCPManager) CallTool(ctx context.Context, toolName string, args map[string]interface{}) (string, error) {
-	// Parse server name from prefixed tool name
-	parts := strings.SplitN(toolName, "__", 2)
-	if len(parts) != 2 {
-		return "", fmt.Errorf("invalid tool name format %q: expected 'server__tool'", toolName)
-	}
-
-	serverName := parts[0]
-	actualTool := parts[1]
-
+	// Build lookup: sanitized server name → original server name + client
 	m.mu.RLock()
-	client, ok := m.clients[serverName]
+	var matchedClient *mcp.Client
+	var actualTool string
+
+	for serverName, client := range m.clients {
+		safeServer := sanitizeToolName(serverName)
+		prefix := safeServer + "__"
+		if strings.HasPrefix(toolName, prefix) {
+			// Find the actual tool name by matching sanitized tool names
+			remainder := toolName[len(prefix):]
+			for _, tool := range client.Tools {
+				if sanitizeToolName(tool.Name) == remainder {
+					matchedClient = client
+					actualTool = tool.Name
+					break
+				}
+			}
+			if matchedClient != nil {
+				break
+			}
+		}
+	}
 	m.mu.RUnlock()
 
-	if !ok {
-		return "", fmt.Errorf("MCP server %q not connected", serverName)
+	if matchedClient == nil {
+		return "", fmt.Errorf("MCP tool %q not found", toolName)
 	}
 
-	return client.CallTool(ctx, actualTool, args)
+	return matchedClient.CallTool(ctx, actualTool, args)
 }
 
 // AddServer adds a new MCP server to the configuration

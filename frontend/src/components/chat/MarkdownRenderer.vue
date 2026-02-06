@@ -2,10 +2,22 @@
 import { computed } from 'vue'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
+import 'highlight.js/styles/github.css'
 
 const props = defineProps<{
   content: string
 }>()
+
+function handleClick(e: MouseEvent) {
+  const anchor = (e.target as HTMLElement).closest('a')
+  if (!anchor) return
+  e.preventDefault()
+  const href = anchor.getAttribute('href')
+  if (href) {
+    const w = window as Record<string, any>
+    w['go']?.['main']?.['ChatApp']?.['OpenExternal']?.(href)
+  }
+}
 
 function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -29,7 +41,7 @@ const rendered = computed(() => md.render(props.content))
 </script>
 
 <template>
-  <div class="markdown-body" v-html="rendered" />
+  <div class="markdown-body" v-html="rendered" @click="handleClick" />
 </template>
 
 <style>
@@ -40,7 +52,8 @@ const rendered = computed(() => md.render(props.content))
 }
 
 .markdown-body pre {
-  background-color: hsl(222.2 84% 4.9%);
+  background-color: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
   border-radius: 0.375rem;
   padding: 0.75rem;
   overflow-x: auto;
@@ -48,7 +61,7 @@ const rendered = computed(() => md.render(props.content))
 }
 
 .markdown-body pre code {
-  color: hsl(210 40% 98%);
+  color: hsl(var(--foreground));
 }
 
 .markdown-body code {

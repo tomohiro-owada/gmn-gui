@@ -115,7 +115,101 @@ func Load() (*Config, error) {
 		}
 	}
 
+	// Load extensions (MCP servers from ~/.gemini/extensions/*)
+	if err := loadExtensions(geminiPath, cwd, cfg); err != nil {
+		// Non-fatal: just skip extensions
+		_ = err
+	}
+
 	return cfg, nil
+}
+
+// geminiExtension represents a gemini-extension.json file
+type geminiExtension struct {
+	Name       string                    `json:"name"`
+	MCPServers map[string]MCPServerConfig `json:"mcpServers"`
+}
+
+// extensionEnablement maps extension name to enablement config
+type extensionEnablement struct {
+	Overrides []string `json:"overrides"`
+}
+
+func loadExtensions(geminiPath, cwd string, cfg *Config) error {
+	extDir := filepath.Join(geminiPath, "extensions")
+
+	// Load enablement config
+	enablement := make(map[string]extensionEnablement)
+	enablementPath := filepath.Join(extDir, "extension-enablement.json")
+	if data, err := os.ReadFile(enablementPath); err == nil {
+		_ = json.Unmarshal(data, &enablement)
+	}
+
+	// Scan extension directories
+	entries, err := os.ReadDir(extDir)
+	if err != nil {
+		return nil // no extensions directory
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		extName := entry.Name()
+		extPath := filepath.Join(extDir, extName)
+		manifestPath := filepath.Join(extPath, "gemini-extension.json")
+
+		data, err := os.ReadFile(manifestPath)
+		if err != nil {
+			continue
+		}
+
+		var ext geminiExtension
+		if err := json.Unmarshal(data, &ext); err != nil {
+			continue
+		}
+
+		// Check enablement: if there's an entry for this extension, check if cwd matches
+		if en, ok := enablement[extName]; ok {
+			if !isEnabledForDir(cwd, en.Overrides) {
+				continue
+			}
+		}
+
+		// Merge MCP servers from extension
+		for serverName, serverCfg := range ext.MCPServers {
+			// Resolve ${extensionPath} in CWD
+			if serverCfg.CWD == "${extensionPath}" {
+				serverCfg.CWD = extPath
+			}
+			// Don't override user-configured servers
+			if _, exists := cfg.MCPServers[serverName]; !exists {
+				cfg.MCPServers[serverName] = serverCfg
+			}
+		}
+	}
+
+	return nil
+}
+
+func isEnabledForDir(cwd string, overrides []string) bool {
+	if len(overrides) == 0 {
+		return true // no overrides = enabled everywhere
+	}
+	for _, pattern := range overrides {
+		matched, err := filepath.Match(pattern, cwd)
+		if err == nil && matched {
+			return true
+		}
+		// Also check if cwd is under the pattern directory (glob * at end)
+		if len(pattern) > 0 && pattern[len(pattern)-1] == '*' {
+			prefix := pattern[:len(pattern)-1]
+			if len(cwd) >= len(prefix) && cwd[:len(prefix)] == prefix {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func loadFile(path string, cfg *Config) error {

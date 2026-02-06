@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { useSettingsStore } from '../stores/settings'
+import { useSettingsStore, primaryColors } from '../stores/settings'
 import { useChatStore } from '../stores/chat'
 import { useI18n } from '../lib/i18n'
 import type { Locale } from '../lib/i18n'
@@ -22,6 +22,23 @@ const { t } = useI18n()
     </div>
 
     <div class="space-y-4 max-w-md">
+      <!-- Primary Color -->
+      <div>
+        <label class="block text-sm font-medium mb-1.5">{{ t('settings.primaryColor') }}</label>
+        <p class="text-xs text-muted-foreground mb-2">{{ t('settings.primaryColorDesc') }}</p>
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="color in primaryColors"
+            :key="color.name"
+            class="w-8 h-8 rounded-full border-2 transition-all hover:scale-110"
+            :class="settingsStore.primaryColor === color.name ? 'border-foreground scale-110 ring-2 ring-ring ring-offset-2 ring-offset-background' : 'border-transparent'"
+            :style="{ backgroundColor: color.hex }"
+            :title="color.name"
+            @click="settingsStore.changePrimaryColor(color.name)"
+          />
+        </div>
+      </div>
+
       <!-- Language -->
       <div>
         <label class="block text-sm font-medium mb-1.5">{{ t('settings.language') }}</label>

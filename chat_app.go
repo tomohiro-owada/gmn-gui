@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 
 	"github.com/tomohiro-owada/gmn-gui/service"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -90,6 +92,19 @@ func (a *ChatApp) shutdown(ctx context.Context) {
 		}
 	}
 	a.mcp.DisconnectAll()
+}
+
+// OpenExternal opens a URL in the default browser or a file path in the default app
+func (a *ChatApp) OpenExternal(target string) error {
+	// If it looks like a relative path, resolve against workDir
+	if !filepath.IsAbs(target) && !isURL(target) {
+		target = filepath.Join(a.workDir, target)
+	}
+	return exec.Command("open", target).Start()
+}
+
+func isURL(s string) bool {
+	return len(s) > 8 && (s[:7] == "http://" || s[:8] == "https://")
 }
 
 // SelectDirectory opens a native directory picker dialog

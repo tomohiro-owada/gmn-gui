@@ -172,6 +172,57 @@ func (s *SettingsService) SetDefaultModel(model string) {
 	s.model = model
 }
 
+// Login starts an OAuth login flow and returns the auth status
+func (s *SettingsService) Login() (AuthStatus, error) {
+	s.mu.Lock()
+	if s.authMgr == nil {
+		s.mu.Unlock()
+		return AuthStatus{Error: "auth manager not initialized"}, fmt.Errorf("not initialized")
+	}
+	mgr := s.authMgr
+	ctx := s.ctx
+	s.mu.Unlock()
+
+	creds, err := mgr.StartLogin(ctx)
+	if err != nil {
+		return AuthStatus{Error: err.Error()}, err
+	}
+
+	if err := mgr.SaveCredentials(creds); err != nil {
+		return AuthStatus{Error: "login succeeded but failed to save: " + err.Error()}, err
+	}
+
+	// Try to get project ID
+	httpClient := mgr.HTTPClient(creds)
+	client := api.NewClient(httpClient)
+	resp, apiErr := client.LoadCodeAssist(ctx)
+	if apiErr == nil && resp.CloudAICompanionProject != "" {
+		s.mu.Lock()
+		s.projectID = resp.CloudAICompanionProject
+		s.mu.Unlock()
+		_ = config.SaveCachedState(&config.CachedState{ProjectID: resp.CloudAICompanionProject})
+	}
+
+	return AuthStatus{
+		Authenticated: true,
+		ProjectID:     s.GetProjectID(),
+	}, nil
+}
+
+// Logout removes stored credentials and clears cached state
+func (s *SettingsService) Logout() AuthStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.authMgr != nil {
+		_ = s.authMgr.DeleteCredentials()
+	}
+	s.projectID = ""
+	_ = config.SaveCachedState(&config.CachedState{})
+
+	return AuthStatus{Authenticated: false}
+}
+
 // AvailableModels returns the list of available models (upstream-aligned)
 func (s *SettingsService) AvailableModels() []string {
 	return []string{
