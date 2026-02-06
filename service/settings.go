@@ -223,6 +223,56 @@ func (s *SettingsService) Logout() AuthStatus {
 	return AuthStatus{Authenticated: false}
 }
 
+// UsageInfo represents a model's usage info for the frontend
+type UsageInfo struct {
+	ModelID           string  `json:"modelId"`
+	RemainingFraction float64 `json:"remainingFraction"`
+	ResetTime         string  `json:"resetTime"`
+}
+
+// UsageResponse represents the full usage data for the frontend
+type UsageResponse struct {
+	Buckets []UsageInfo `json:"buckets"`
+	Error   string      `json:"error,omitempty"`
+}
+
+// GetUsage retrieves user quota from the API
+func (s *SettingsService) GetUsage() UsageResponse {
+	ctx := s.ctx
+	client, err := s.EnsureAuth(ctx)
+	if err != nil {
+		return UsageResponse{Error: err.Error()}
+	}
+
+	projectID := s.GetProjectID()
+	if projectID == "" {
+		return UsageResponse{Error: "no project ID"}
+	}
+
+	resp, err := client.RetrieveUserQuota(ctx, projectID)
+	if err != nil {
+		return UsageResponse{Error: err.Error()}
+	}
+
+	var buckets []UsageInfo
+	for _, b := range resp.Buckets {
+		if b.ModelID == "" {
+			continue
+		}
+		frac := 0.0
+		if b.RemainingFraction != nil {
+			frac = *b.RemainingFraction
+		}
+		buckets = append(buckets, UsageInfo{
+			ModelID:           b.ModelID,
+			RemainingFraction: frac,
+			ResetTime:         b.ResetTime,
+		})
+	}
+
+	return UsageResponse{Buckets: buckets}
+}
+
 // AvailableModels returns the list of available models (upstream-aligned)
 func (s *SettingsService) AvailableModels() []string {
 	return []string{

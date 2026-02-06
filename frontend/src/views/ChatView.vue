@@ -8,6 +8,7 @@ import ChatInput from '../components/chat/ChatInput.vue'
 import MessageBubble from '../components/chat/MessageBubble.vue'
 import StreamingText from '../components/chat/StreamingText.vue'
 import AskUserDialog from '../components/chat/AskUserDialog.vue'
+import UsageDialog from '../components/chat/UsageDialog.vue'
 
 const chatStore = useChatStore()
 const settingsStore = useSettingsStore()
@@ -165,6 +166,13 @@ function shortenPath(path: string): string {
       :questions="chatStore.askUserQuestions"
       :visible="chatStore.askUserVisible"
       @done="chatStore.askUserVisible = false"
+    />
+
+    <!-- Usage Dialog -->
+    <UsageDialog
+      :visible="chatStore.usageVisible"
+      :data="chatStore.usageData"
+      @close="chatStore.usageVisible = false"
     />
   </div>
 </template>

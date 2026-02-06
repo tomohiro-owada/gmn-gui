@@ -298,6 +298,60 @@ func (c *Client) LoadCodeAssist(ctx context.Context) (*LoadCodeAssistResponse, e
 	return &result, nil
 }
 
+// RetrieveUserQuotaRequest is the request to retrieve user quota
+type RetrieveUserQuotaRequest struct {
+	Project string `json:"project"`
+}
+
+// BucketInfo represents quota information for a model
+type BucketInfo struct {
+	RemainingAmount  string  `json:"remainingAmount,omitempty"`
+	RemainingFraction *float64 `json:"remainingFraction,omitempty"`
+	ResetTime        string  `json:"resetTime,omitempty"`
+	TokenType        string  `json:"tokenType,omitempty"`
+	ModelID          string  `json:"modelId,omitempty"`
+}
+
+// RetrieveUserQuotaResponse is the response from retrieveUserQuota
+type RetrieveUserQuotaResponse struct {
+	Buckets []BucketInfo `json:"buckets,omitempty"`
+}
+
+// RetrieveUserQuota retrieves the user's quota information
+func (c *Client) RetrieveUserQuota(ctx context.Context, projectID string) (*RetrieveUserQuotaResponse, error) {
+	endpoint := fmt.Sprintf("%s/%s:retrieveUserQuota", c.baseURL, apiVersion)
+
+	req := RetrieveUserQuotaRequest{Project: projectID}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var result RetrieveUserQuotaResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
 // GenerateStream sends a streaming generate request
 func (c *Client) GenerateStream(ctx context.Context, req *GenerateRequest) (<-chan StreamEvent, error) {
 	endpoint := fmt.Sprintf("%s/%s:streamGenerateContent?alt=sse", c.baseURL, apiVersion)

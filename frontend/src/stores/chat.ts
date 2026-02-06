@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { SendMessage, StopGeneration, ClearHistory, GetMessages, GetModel, SetModel, GetWorkDir, SetWorkDir, SubmitAskUserResponse, GetPlanMode, SetPlanMode } from '../../wailsjs/go/service/ChatService'
+import { GetUsage } from '../../wailsjs/go/service/SettingsService'
 import { SaveCurrentSession } from '../../wailsjs/go/service/SessionService'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import type { service } from '../../wailsjs/go/models'
@@ -29,6 +30,10 @@ export const useChatStore = defineStore('chat', () => {
 
   // plan mode
   const planMode = ref(false)
+
+  // usage dialog
+  const usageVisible = ref(false)
+  const usageData = ref<service.UsageResponse | null>(null)
 
   function setAutoSaveCallback(cb: () => string | null) {
     autoSaveSessionId = cb
@@ -100,9 +105,34 @@ export const useChatStore = defineStore('chat', () => {
     workDir.value = dir
   }
 
+  async function handleSlashCommand(text: string): Promise<boolean> {
+    const cmd = text.trim().toLowerCase()
+    if (cmd === '/usage' || cmd === '/stats') {
+      try {
+        const resp = await GetUsage()
+        if (resp.error) {
+          error.value = resp.error
+        } else {
+          usageData.value = resp
+          usageVisible.value = true
+        }
+      } catch (e) {
+        error.value = String(e)
+      }
+      return true
+    }
+    return false
+  }
+
   async function send(text: string) {
     if (!text.trim() || isStreaming.value) return
     error.value = null
+
+    // Handle slash commands locally
+    if (text.trim().startsWith('/')) {
+      if (await handleSlashCommand(text)) return
+    }
+
     isStreaming.value = true
     streamingText.value = ''
     try {
@@ -152,6 +182,8 @@ export const useChatStore = defineStore('chat', () => {
     askUserVisible,
     askUserQuestions,
     planMode,
+    usageVisible,
+    usageData,
     setupEvents,
     setAutoSaveCallback,
     fetchSessionModel,

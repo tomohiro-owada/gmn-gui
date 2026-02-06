@@ -31,7 +31,6 @@ export const useSettingsStore = defineStore('settings', () => {
   const loading = ref(false)
   const primaryColor = ref<string>(primaryColors[0].name)
   const fontSize = ref(16)
-
   async function fetchAuthStatus() {
     try {
       authStatus.value = await GetAuthStatus()

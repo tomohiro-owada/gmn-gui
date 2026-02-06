@@ -1,9 +1,11 @@
 <script lang="ts" setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useLauncherStore } from '../stores/launcher'
 import { useSettingsStore, primaryColors } from '../stores/settings'
 import { useI18n } from '../lib/i18n'
 import type { Locale } from '../lib/i18n'
+import { GetUsage } from '../../wailsjs/go/service/SettingsService'
+import type { service } from '../../wailsjs/go/models'
 
 const launcherStore = useLauncherStore()
 const settingsStore = useSettingsStore()
@@ -11,6 +13,35 @@ const { t } = useI18n()
 
 const showSettings = ref(false)
 const loginLoading = ref(false)
+const usageData = ref<service.UsageResponse | null>(null)
+const usageLoading = ref(false)
+
+async function fetchUsage() {
+  if (!settingsStore.authStatus?.authenticated) return
+  usageLoading.value = true
+  try {
+    usageData.value = await GetUsage()
+  } catch {
+    usageData.value = null
+  } finally {
+    usageLoading.value = false
+  }
+}
+
+function formatResetTime(resetTime: string): string {
+  const diff = new Date(resetTime).getTime() - Date.now()
+  if (diff <= 0) return ''
+  const totalMinutes = Math.ceil(diff / (1000 * 60))
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  if (hours > 0 && minutes > 0) return `Resets in ${hours}h ${minutes}m`
+  if (hours > 0) return `Resets in ${hours}h`
+  return `Resets in ${minutes}m`
+}
+
+watch(showSettings, (v) => {
+  if (v) fetchUsage()
+})
 
 onMounted(async () => {
   await settingsStore.initialize()
@@ -159,6 +190,43 @@ async function handleLogin() {
             {{ m }}
           </option>
         </select>
+      </div>
+
+      <!-- Usage -->
+      <div v-if="settingsStore.authStatus?.authenticated">
+        <div class="flex items-center justify-between mb-1">
+          <label class="block text-xs font-medium text-muted-foreground">{{ t('settings.usage') }}</label>
+          <button
+            class="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+            :disabled="usageLoading"
+            @click="fetchUsage"
+          >{{ usageLoading ? '...' : '↻' }}</button>
+        </div>
+        <div class="rounded-lg border border-border bg-background p-2 text-xs">
+          <div v-if="usageData?.error" class="text-destructive">{{ usageData.error }}</div>
+          <div v-else-if="usageData?.buckets?.length">
+            <!-- Header -->
+            <div class="grid grid-cols-[1fr_3rem_auto] gap-x-2 pb-1 border-b border-border/50 text-[11px] font-medium text-muted-foreground">
+              <span>Model</span>
+              <span class="text-right">Left</span>
+              <span class="text-right">Reset</span>
+            </div>
+            <!-- Rows -->
+            <div
+              v-for="b in usageData.buckets"
+              :key="b.modelId"
+              class="grid grid-cols-[1fr_3rem_auto] gap-x-2 py-1 border-b border-border/30 last:border-0"
+            >
+              <span class="truncate">{{ b.modelId }}</span>
+              <span class="text-right tabular-nums"
+                :class="b.remainingFraction < 0.2 ? 'text-destructive' : b.remainingFraction < 0.5 ? 'text-amber-500' : ''"
+              >{{ (b.remainingFraction * 100).toFixed(0) }}%</span>
+              <span class="text-right text-muted-foreground text-[10px]">{{ b.resetTime ? formatResetTime(b.resetTime) : '' }}</span>
+            </div>
+          </div>
+          <div v-else-if="usageLoading" class="text-muted-foreground text-center py-1">Loading...</div>
+          <div v-else class="text-muted-foreground text-center py-1">No data</div>
+        </div>
       </div>
 
       <!-- Reload Config -->
