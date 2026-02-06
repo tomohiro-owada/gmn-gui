@@ -11,7 +11,15 @@ const { t } = useI18n()
 
 <template>
   <div class="flex-1 flex flex-col p-6 overflow-y-auto">
-    <h2 class="text-xl font-bold mb-6">{{ t('settings.title') }}</h2>
+    <div class="flex items-center gap-3 mb-6">
+      <router-link
+        to="/"
+        class="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+      </router-link>
+      <h2 class="text-xl font-bold">{{ t('settings.title') }}</h2>
+    </div>
 
     <div class="space-y-4 max-w-md">
       <!-- Language -->

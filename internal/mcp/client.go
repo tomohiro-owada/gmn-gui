@@ -57,9 +57,15 @@ type jsonRPCError struct {
 	Message string `json:"message"`
 }
 
-// NewClient creates a new MCP client
-func NewClient(command string, args []string, env map[string]string) (*Client, error) {
+// NewClient creates a new MCP client.
+// If cwd is non-empty, the subprocess starts in that directory.
+func NewClient(command string, args []string, env map[string]string, cwd string) (*Client, error) {
 	cmd := exec.Command(command, args...)
+
+	// Set working directory
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
 
 	// Set environment
 	cmd.Env = os.Environ()

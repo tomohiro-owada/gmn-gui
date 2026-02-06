@@ -38,6 +38,11 @@ const messages: Record<Locale, Record<string, string>> = {
     'mcp.connect': 'Connect',
     'mcp.disconnect': 'Disconnect',
     'mcp.toolsAvailable': 'tools available',
+    'launcher.title': 'Recent Projects',
+    'launcher.newProject': 'Open Directory',
+    'launcher.noProjects': 'No recent projects',
+    'launcher.sessions': 'sessions',
+    'launcher.open': 'Open',
   },
   ja: {
     'sidebar.selectDir': 'ディレクトリを選択...',
@@ -72,6 +77,11 @@ const messages: Record<Locale, Record<string, string>> = {
     'mcp.connect': '接続',
     'mcp.disconnect': '切断',
     'mcp.toolsAvailable': 'ツール利用可能',
+    'launcher.title': '最近のプロジェクト',
+    'launcher.newProject': 'ディレクトリを開く',
+    'launcher.noProjects': 'プロジェクトがありません',
+    'launcher.sessions': 'セッション',
+    'launcher.open': '開く',
   },
 }
 

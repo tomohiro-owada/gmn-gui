@@ -108,7 +108,7 @@ func (m *MCPManager) ConnectServer(name string) error {
 		return fmt.Errorf("server %q has no command configured (HTTP transport not yet supported)", name)
 	}
 
-	client, err := mcp.NewClient(serverCfg.Command, serverCfg.Args, serverCfg.Env)
+	client, err := mcp.NewClient(serverCfg.Command, serverCfg.Args, serverCfg.Env, serverCfg.CWD)
 	if err != nil {
 		m.mu.Lock()
 		m.errors[name] = err.Error()

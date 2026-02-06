@@ -42,7 +42,8 @@ type SessionService struct {
 	dir  string
 }
 
-// NewSessionService creates a new session service
+// NewSessionService creates a new session service.
+// chat may be nil for read-only mode (e.g. Launcher).
 func NewSessionService(chat *ChatService) *SessionService {
 	home, _ := os.UserHomeDir()
 	dir := filepath.Join(home, ".gemini", "gmn-gui", "sessions")
@@ -52,6 +53,55 @@ func NewSessionService(chat *ChatService) *SessionService {
 		chat: chat,
 		dir:  dir,
 	}
+}
+
+// WorkDirInfo groups sessions by working directory for the Launcher
+type WorkDirInfo struct {
+	Path         string           `json:"path"`
+	Model        string           `json:"model"`
+	UpdatedAt    time.Time        `json:"updatedAt"`
+	SessionCount int              `json:"sessionCount"`
+	Sessions     []SessionSummary `json:"sessions"`
+}
+
+// ListRecentWorkDirs returns unique working directories with their sessions, sorted by recency
+func (s *SessionService) ListRecentWorkDirs() []WorkDirInfo {
+	sessions := s.ListSessions() // already sorted by updatedAt desc
+
+	grouped := make(map[string]*WorkDirInfo)
+	var order []string // preserve first-seen order (most recent first)
+
+	for _, sess := range sessions {
+		key := sess.WorkDir
+		if key == "" {
+			key = "(no directory)"
+		}
+		if _, ok := grouped[key]; !ok {
+			grouped[key] = &WorkDirInfo{
+				Path:      key,
+				Model:     sess.Model,
+				UpdatedAt: sess.UpdatedAt,
+			}
+			order = append(order, key)
+		}
+		grouped[key].SessionCount++
+		grouped[key].Sessions = append(grouped[key].Sessions, sess)
+	}
+
+	var result []WorkDirInfo
+	for _, key := range order {
+		result = append(result, *grouped[key])
+	}
+	return result
+}
+
+// NewSessionForDir clears chat and returns a new session ID, preserving the given workDir
+func (s *SessionService) NewSessionForDir(dir string) string {
+	if s.chat != nil {
+		s.chat.ClearHistory()
+		s.chat.SetWorkDir(dir)
+	}
+	return fmt.Sprintf("session-%d", time.Now().UnixNano())
 }
 
 // SetContext sets the Wails runtime context
@@ -98,6 +148,9 @@ func (s *SessionService) ListSessions() []SessionSummary {
 
 // SaveCurrentSession saves the current chat state as a session
 func (s *SessionService) SaveCurrentSession(id string) error {
+	if s.chat == nil {
+		return fmt.Errorf("chat service not available")
+	}
 	s.chat.mu.Lock()
 	msgs := make([]ChatMessage, len(s.chat.messages))
 	copy(msgs, s.chat.messages)
@@ -153,6 +206,9 @@ func (s *SessionService) SaveCurrentSession(id string) error {
 
 // LoadSession restores a session into the chat service
 func (s *SessionService) LoadSession(id string) error {
+	if s.chat == nil {
+		return fmt.Errorf("chat service not available")
+	}
 	sd := s.loadFile(id)
 	if sd == nil {
 		return fmt.Errorf("session %s not found", id)
@@ -175,7 +231,9 @@ func (s *SessionService) DeleteSession(id string) error {
 
 // NewSession clears the current chat and returns a new session ID
 func (s *SessionService) NewSession() string {
-	s.chat.ClearHistory()
+	if s.chat != nil {
+		s.chat.ClearHistory()
+	}
 	return fmt.Sprintf("session-%d", time.Now().UnixNano())
 }
 
