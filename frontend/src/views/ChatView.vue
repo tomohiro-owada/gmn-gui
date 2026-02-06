@@ -90,9 +90,13 @@ async function handleSend(text: string) {
       <!-- Streaming indicator (no text yet) -->
       <div
         v-if="chatStore.isStreaming && chatStore.streamingText.length === 0"
-        class="flex items-center gap-2 text-muted-foreground text-sm"
+        class="flex justify-start"
       >
-        <span class="animate-pulse">Thinking...</span>
+        <div class="rounded-lg bg-muted px-4 py-3 flex items-center gap-1.5">
+          <span class="thinking-dot w-2 h-2 rounded-full bg-foreground/40" style="animation-delay: 0ms" />
+          <span class="thinking-dot w-2 h-2 rounded-full bg-foreground/40" style="animation-delay: 150ms" />
+          <span class="thinking-dot w-2 h-2 rounded-full bg-foreground/40" style="animation-delay: 300ms" />
+        </div>
       </div>
 
       <!-- Error display -->

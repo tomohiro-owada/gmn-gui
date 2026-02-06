@@ -16,14 +16,14 @@ export const useMCPStore = defineStore('mcp', () => {
 
   function setupEvents() {
     EventsOn('mcp:updated', (updated: service.MCPServerStatus[]) => {
-      servers.value = updated
+      servers.value = updated ?? []
     })
   }
 
   async function fetchServers() {
     loading.value = true
     try {
-      servers.value = await ListServers()
+      servers.value = (await ListServers()) ?? []
     } finally {
       loading.value = false
     }
