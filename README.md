@@ -2,6 +2,8 @@
 
 [English](#english) | [日本語](#日本語)
 
+<img width="1046" height="752" alt="Screenshot 2026-02-06 at 3 01 11 PM" src="https://github.com/user-attachments/assets/c38c231f-c8c6-41ce-9139-fa17d06bb473" />
+
 ---
 
 <a id="日本語"></a>
@@ -9,6 +11,8 @@
 ## 日本語
 
 **gmn-gui** は [Gemini CLI](https://github.com/GoogleCloudPlatform/gemini-cli) の非公式 GUI クライアントです。Google の Gemini Code Assist API を利用し、AI によるコーディング支援をネイティブデスクトップアプリとして提供します。
+
+
 
 ### 特徴
 
@@ -180,6 +184,7 @@ Apache License 2.0
 ## English
 
 **gmn-gui** is an unofficial GUI client for [Gemini CLI](https://github.com/GoogleCloudPlatform/gemini-cli). It provides AI-powered coding assistance as a native desktop app using Google's Gemini Code Assist API.
+<img width="1046" height="751" alt="Screenshot 2026-02-06 at 3 00 31 PM" src="https://github.com/user-attachments/assets/d9980247-0c06-417c-af22-49cc65731428" />
 
 ### Features
 
