@@ -21,7 +21,7 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 9, G: 14, B: 27, A: 1},
+		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 255, A: 1},
 		OnStartup:        app.startup,
 		OnShutdown:        app.shutdown,
 		Bind: []interface{}{
@@ -29,6 +29,7 @@ func main() {
 			app.settings,
 			app.chat,
 			app.mcp,
+			app.session,
 		},
 	})
 

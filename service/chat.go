@@ -40,6 +40,7 @@ type ChatService struct {
 	messages []ChatMessage  // UI display messages
 	history  []api.Content  // API request history
 	model    string         // Per-session model (overrides default)
+	workDir  string         // Working directory for this session
 	cancel   context.CancelFunc
 }
 
@@ -66,6 +67,20 @@ func (c *ChatService) SetModel(model string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.model = model
+}
+
+// GetWorkDir returns the current working directory
+func (c *ChatService) GetWorkDir() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.workDir
+}
+
+// SetWorkDir sets the working directory for the current session
+func (c *ChatService) SetWorkDir(dir string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.workDir = dir
 }
 
 // SetContext sets the Wails runtime context
@@ -118,6 +133,7 @@ func (c *ChatService) ClearHistory() {
 	c.messages = nil
 	c.history = nil
 	c.model = ""
+	c.workDir = ""
 	runtime.EventsEmit(c.ctx, "chat:messages", []ChatMessage{})
 }
 

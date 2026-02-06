@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { SendMessage, StopGeneration, ClearHistory, GetMessages, GetModel, SetModel } from '../../wailsjs/go/service/ChatService'
+import { SendMessage, StopGeneration, ClearHistory, GetMessages, GetModel, SetModel, GetWorkDir, SetWorkDir } from '../../wailsjs/go/service/ChatService'
+import { SaveCurrentSession } from '../../wailsjs/go/service/SessionService'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import type { service } from '../../wailsjs/go/models'
 
@@ -11,12 +12,20 @@ export interface StreamEvent {
   toolArgs?: string
 }
 
+// Auto-save callback set by App.vue
+let autoSaveSessionId: (() => string | null) | null = null
+
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<service.ChatMessage[]>([])
   const streamingText = ref('')
   const isStreaming = ref(false)
   const error = ref<string | null>(null)
   const sessionModel = ref('')
+  const workDir = ref('')
+
+  function setAutoSaveCallback(cb: () => string | null) {
+    autoSaveSessionId = cb
+  }
 
   function setupEvents() {
     EventsOn('chat:stream', (event: StreamEvent) => {
@@ -36,6 +45,11 @@ export const useChatStore = defineStore('chat', () => {
         case 'done':
           isStreaming.value = false
           streamingText.value = ''
+          // Auto-save session
+          if (autoSaveSessionId) {
+            const id = autoSaveSessionId()
+            if (id) SaveCurrentSession(id).catch(() => {})
+          }
           break
         case 'error':
           isStreaming.value = false
@@ -46,7 +60,7 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     EventsOn('chat:messages', (msgs: service.ChatMessage[]) => {
-      messages.value = msgs
+      messages.value = msgs ?? []
     })
   }
 
@@ -57,6 +71,15 @@ export const useChatStore = defineStore('chat', () => {
   async function changeSessionModel(model: string) {
     await SetModel(model)
     sessionModel.value = model
+  }
+
+  async function fetchWorkDir() {
+    workDir.value = await GetWorkDir()
+  }
+
+  async function changeWorkDir(dir: string) {
+    await SetWorkDir(dir)
+    workDir.value = dir
   }
 
   async function send(text: string) {
@@ -80,6 +103,7 @@ export const useChatStore = defineStore('chat', () => {
     streamingText.value = ''
     error.value = null
     sessionModel.value = ''
+    workDir.value = ''
     await fetchSessionModel()
   }
 
@@ -93,9 +117,13 @@ export const useChatStore = defineStore('chat', () => {
     isStreaming,
     error,
     sessionModel,
+    workDir,
     setupEvents,
+    setAutoSaveCallback,
     fetchSessionModel,
     changeSessionModel,
+    fetchWorkDir,
+    changeWorkDir,
     send,
     stop,
     clear,
