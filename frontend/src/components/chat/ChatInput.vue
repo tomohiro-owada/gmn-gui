@@ -19,12 +19,18 @@ const isComposing = ref(false)
 
 function handleKeydown(e: KeyboardEvent) {
   // Don't send during IME composition (e.g. Japanese input)
-  if (isComposing.value) return
+  // Check both native isComposing and our ref, plus keyCode 229 (composition)
+  if (e.isComposing || isComposing.value || e.keyCode === 229) return
 
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     send()
   }
+}
+
+function handleCompositionEnd() {
+  // Delay clearing so the final Enter keydown is still blocked
+  setTimeout(() => { isComposing.value = false }, 50)
 }
 
 function send() {
@@ -49,7 +55,7 @@ function send() {
                  disabled:opacity-50 max-h-32 overflow-y-auto"
           @keydown="handleKeydown"
           @compositionstart="isComposing = true"
-          @compositionend="isComposing = false"
+          @compositionend="handleCompositionEnd"
         />
       </div>
       <button
