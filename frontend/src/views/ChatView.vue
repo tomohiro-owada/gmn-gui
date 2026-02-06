@@ -2,12 +2,14 @@
 import { ref, computed, nextTick, watch } from 'vue'
 import { useChatStore } from '../stores/chat'
 import { useSettingsStore } from '../stores/settings'
+import { useI18n } from '../lib/i18n'
 import ChatInput from '../components/chat/ChatInput.vue'
 import MessageBubble from '../components/chat/MessageBubble.vue'
 import StreamingText from '../components/chat/StreamingText.vue'
 
 const chatStore = useChatStore()
 const settingsStore = useSettingsStore()
+const { t } = useI18n()
 const messagesContainer = ref<HTMLElement | null>(null)
 
 const showStreamingBubble = computed(() => {
@@ -36,12 +38,12 @@ async function handleSend(text: string) {
     <!-- Header with session model selector -->
     <div class="flex items-center justify-between px-4 py-2 border-b border-border bg-card">
       <div class="flex items-center gap-2">
-        <span class="text-sm font-medium">Chat</span>
+        <span class="text-sm font-medium">{{ t('chat.title') }}</span>
         <button
           class="text-xs text-muted-foreground hover:text-foreground transition-colors"
           @click="chatStore.clear()"
         >
-          New
+          {{ t('chat.new') }}
         </button>
       </div>
       <select
@@ -64,12 +66,12 @@ async function handleSend(text: string) {
         class="flex-1 flex items-center justify-center h-full"
       >
         <div class="text-center space-y-3">
-          <p class="text-2xl font-semibold">gmn-gui</p>
+          <p class="text-2xl font-semibold">{{ t('chat.emptyTitle') }}</p>
           <p class="text-muted-foreground text-sm">
-            Start a conversation with Gemini
+            {{ t('chat.emptySubtitle') }}
           </p>
           <p class="text-xs text-muted-foreground">
-            Model: {{ chatStore.sessionModel }}
+            {{ t('chat.emptyModel') }}: {{ chatStore.sessionModel }}
           </p>
         </div>
       </div>

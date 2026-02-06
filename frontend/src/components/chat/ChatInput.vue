@@ -1,5 +1,8 @@
 <script lang="ts" setup>
 import { ref } from 'vue'
+import { useI18n } from '../../lib/i18n'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   disabled: boolean
@@ -39,7 +42,7 @@ function send() {
         <textarea
           v-model="inputText"
           :disabled="disabled"
-          placeholder="Send a message..."
+          :placeholder="t('chat.placeholder')"
           rows="1"
           class="w-full resize-none rounded-lg border border-input bg-background px-3 py-2.5 text-sm
                  placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring
@@ -55,7 +58,7 @@ function send() {
                hover:bg-destructive/90 transition-colors"
         @click="emit('stop')"
       >
-        Stop
+        {{ t('chat.stop') }}
       </button>
       <button
         v-else
@@ -64,7 +67,7 @@ function send() {
                hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         @click="send"
       >
-        Send
+        {{ t('chat.send') }}
       </button>
     </div>
   </div>

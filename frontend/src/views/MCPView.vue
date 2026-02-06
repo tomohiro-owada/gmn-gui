@@ -1,19 +1,21 @@
 <script lang="ts" setup>
 import { useMCPStore } from '../stores/mcp'
+import { useI18n } from '../lib/i18n'
 
 const mcpStore = useMCPStore()
+const { t } = useI18n()
 </script>
 
 <template>
   <div class="flex-1 flex flex-col p-6 overflow-y-auto">
     <div class="flex items-center justify-between mb-6">
-      <h2 class="text-xl font-bold">MCP Servers</h2>
+      <h2 class="text-xl font-bold">{{ t('mcp.title') }}</h2>
       <button
         class="rounded-lg border border-input px-3 py-1.5 text-sm hover:bg-accent transition-colors"
         :disabled="mcpStore.loading"
         @click="mcpStore.fetchServers()"
       >
-        Refresh
+        {{ t('mcp.refresh') }}
       </button>
     </div>
 
@@ -22,8 +24,8 @@ const mcpStore = useMCPStore()
       v-if="mcpStore.servers.length === 0"
       class="text-center text-muted-foreground py-12"
     >
-      <p class="text-sm">No MCP servers configured.</p>
-      <p class="text-xs mt-1">Add servers in ~/.gemini/settings.json</p>
+      <p class="text-sm">{{ t('mcp.noServers') }}</p>
+      <p class="text-xs mt-1">{{ t('mcp.addInSettings') }}</p>
     </div>
 
     <!-- Server list -->
@@ -48,14 +50,14 @@ const mcpStore = useMCPStore()
               :disabled="mcpStore.loading"
               @click="mcpStore.connect(server.name)"
             >
-              Connect
+              {{ t('mcp.connect') }}
             </button>
             <button
               v-else
               class="rounded px-3 py-1 text-xs border border-input hover:bg-accent transition-colors"
               @click="mcpStore.disconnect(server.name)"
             >
-              Disconnect
+              {{ t('mcp.disconnect') }}
             </button>
           </div>
         </div>
@@ -68,7 +70,7 @@ const mcpStore = useMCPStore()
         </p>
 
         <div v-if="server.connected && server.toolCount > 0" class="mt-2">
-          <p class="text-xs text-muted-foreground">{{ server.toolCount }} tools available</p>
+          <p class="text-xs text-muted-foreground">{{ server.toolCount }} {{ t('mcp.toolsAvailable') }}</p>
           <div class="flex flex-wrap gap-1 mt-1">
             <span
               v-for="tool in server.tools"

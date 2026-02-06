@@ -2,11 +2,13 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { GetAuthStatus, GetDefaultModel, SetDefaultModel, AvailableModels, ReloadConfig } from '../../wailsjs/go/service/SettingsService'
 import type { service } from '../../wailsjs/go/models'
+import { setLocale, type Locale } from '../lib/i18n'
 
 export const useSettingsStore = defineStore('settings', () => {
   const authStatus = ref<service.AuthStatus | null>(null)
   const defaultModel = ref('gemini-2.5-flash')
   const availableModels = ref<string[]>([])
+  const locale = ref<Locale>('en')
   const loading = ref(false)
 
   async function fetchAuthStatus() {
@@ -40,7 +42,20 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  function changeLocale(newLocale: Locale) {
+    locale.value = newLocale
+    setLocale(newLocale)
+    localStorage.setItem('gmn-gui-locale', newLocale)
+  }
+
   async function initialize() {
+    // Restore locale from localStorage
+    const savedLocale = localStorage.getItem('gmn-gui-locale') as Locale | null
+    if (savedLocale && (savedLocale === 'en' || savedLocale === 'ja')) {
+      locale.value = savedLocale
+      setLocale(savedLocale)
+    }
+
     await Promise.all([
       fetchAuthStatus(),
       fetchDefaultModel(),
@@ -52,9 +67,11 @@ export const useSettingsStore = defineStore('settings', () => {
     authStatus,
     defaultModel,
     availableModels,
+    locale,
     loading,
     fetchAuthStatus,
     changeDefaultModel,
+    changeLocale,
     reloadConfig,
     initialize,
   }
