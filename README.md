@@ -44,6 +44,17 @@
 | Windows | `gmn-gui.exe` | そのまま実行可能 |
 | Windows | `gmn-gui-amd64-installer.exe` | インストーラー付き |
 
+#### Windows SmartScreen の警告について
+
+gmn-gui は署名されていないアプリのため、初回起動時に「Windows によって PC が保護されました」と表示されることがあります。
+
+**回避方法：**
+
+1. 「詳細情報」をクリック
+2. 「実行」をクリック
+
+> 2 回目以降は通常通り起動できます。
+
 #### macOS Gatekeeper の警告について
 
 gmn-gui は署名されていない野良アプリのため、初回起動時に「"gmn-gui" は開発元が未確認のため開けません」と表示されます。
@@ -220,6 +231,17 @@ Download the appropriate file for your OS from the [Releases page](https://githu
 | macOS (Apple Silicon) | `gmn-gui-darwin-arm64.zip` | Unzip and move to `/Applications` |
 | Windows | `gmn-gui.exe` | Portable executable |
 | Windows | `gmn-gui-amd64-installer.exe` | Installer with setup wizard |
+
+#### Windows SmartScreen warning
+
+gmn-gui is an unsigned app. On first launch, Windows may show: *"Windows protected your PC"*.
+
+**Workaround:**
+
+1. Click "More info"
+2. Click "Run anyway"
+
+> Subsequent launches will work normally.
 
 #### macOS Gatekeeper warning
 
