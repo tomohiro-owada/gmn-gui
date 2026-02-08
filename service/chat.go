@@ -2,8 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -141,20 +144,56 @@ func (c *ChatService) SetContext(ctx context.Context) {
 
 // SendMessage sends a user message and starts streaming the response
 func (c *ChatService) SendMessage(text string) error {
+	return c.SendMessageWithFiles(text, nil)
+}
+
+// AttachedFile represents a file attached to a message
+type AttachedFile struct {
+	Path     string `json:"path"`
+	MimeType string `json:"mimeType"`
+}
+
+// SendMessageWithFiles sends a message with optional file attachments
+func (c *ChatService) SendMessageWithFiles(text string, files []AttachedFile) error {
 	c.mu.Lock()
 
+	// Build parts: text + inline files
+	parts := []api.Part{}
+	if text != "" {
+		parts = append(parts, api.Part{Text: text})
+	}
+
+	// Read and encode files
+	for _, file := range files {
+		data, err := readFileAsBase64(file.Path)
+		if err != nil {
+			c.mu.Unlock()
+			return fmt.Errorf("failed to read file %s: %w", file.Path, err)
+		}
+		parts = append(parts, api.Part{
+			InlineData: &api.InlineData{
+				MimeType: file.MimeType,
+				Data:     data,
+			},
+		})
+	}
+
 	// Add user message to history
+	displayContent := text
+	if len(files) > 0 {
+		displayContent += fmt.Sprintf(" [%d file(s) attached]", len(files))
+	}
 	userMsg := ChatMessage{
 		ID:        fmt.Sprintf("msg-%d", time.Now().UnixNano()),
 		Role:      "user",
-		Content:   text,
+		Content:   displayContent,
 		Timestamp: time.Now(),
 	}
 	c.messages = append(c.messages, userMsg)
 
 	c.history = append(c.history, api.Content{
 		Role:  "user",
-		Parts: []api.Part{{Text: text}},
+		Parts: parts,
 	})
 
 	c.mu.Unlock()
@@ -421,7 +460,7 @@ func (c *ChatService) handleToolCalls(ctx context.Context, client *api.Client, t
 		} else if tc.Name == "ask_user" {
 			result, err = c.execAskUser(ctx, tc.Args)
 		} else if IsBuiltinTool(tc.Name) {
-			result, err = ExecuteBuiltinTool(ctx, c.GetWorkDir(), tc.Name, tc.Args)
+			result, err = ExecuteBuiltinTool(ctx, c.GetWorkDir(), tc.Name, tc.Args, c.settings)
 		} else {
 			result, err = c.mcp.CallTool(ctx, tc.Name, tc.Args)
 		}
@@ -513,4 +552,53 @@ func (c *ChatService) execAskUser(ctx context.Context, args map[string]interface
 func stringVal(m map[string]interface{}, key string) string {
 	v, _ := m[key].(string)
 	return v
+}
+
+// readFileAsBase64 reads a file and returns its base64-encoded content
+func readFileAsBase64(filePath string) (string, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(data), nil
+}
+
+// FileData represents a file sent from frontend
+type FileData struct {
+	Filename string `json:"filename"`
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"` // base64-encoded
+}
+
+// SaveFilesToTemp saves files to temporary directory and returns AttachedFile structs
+func (c *ChatService) SaveFilesToTemp(files []FileData) ([]AttachedFile, error) {
+	// Get temp directory
+	tempDir := filepath.Join(os.TempDir(), "gmn-gui")
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+	}
+
+	result := make([]AttachedFile, len(files))
+	for i, file := range files {
+		// Decode base64
+		data, err := base64.StdEncoding.DecodeString(file.Data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode file %s: %w", file.Filename, err)
+		}
+
+		// Create temp file path
+		tempPath := filepath.Join(tempDir, fmt.Sprintf("%d_%s", time.Now().UnixNano(), file.Filename))
+
+		// Write file
+		if err := os.WriteFile(tempPath, data, 0644); err != nil {
+			return nil, fmt.Errorf("failed to write file %s: %w", file.Filename, err)
+		}
+
+		result[i] = AttachedFile{
+			Path:     tempPath,
+			MimeType: file.MimeType,
+		}
+	}
+
+	return result, nil
 }

@@ -32,8 +32,8 @@ function scrollToBottom() {
 watch(() => chatStore.messages.length, scrollToBottom)
 watch(() => chatStore.streamingText, scrollToBottom)
 
-async function handleSend(text: string) {
-  await chatStore.send(text)
+async function handleSend(data: { text: string; files: File[] }) {
+  await chatStore.sendWithFiles(data.text, data.files)
   scrollToBottom()
 }
 

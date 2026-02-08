@@ -90,6 +90,13 @@ type Part struct {
 	ThoughtSignature string        `json:"thoughtSignature,omitempty"`
 	FunctionCall     *FunctionCall `json:"functionCall,omitempty"`
 	FunctionResp     *FunctionResp `json:"functionResponse,omitempty"`
+	InlineData       *InlineData   `json:"inlineData,omitempty"`
+}
+
+// InlineData represents inline file data (images, etc.)
+type InlineData struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"` // base64-encoded
 }
 
 // FunctionCall represents a tool call
@@ -114,7 +121,25 @@ type GenerationConfig struct {
 
 // Tool represents a tool definition
 type Tool struct {
-	FunctionDeclarations []FunctionDecl `json:"functionDeclarations"`
+	FunctionDeclarations  []FunctionDecl         `json:"functionDeclarations,omitempty"`
+	GoogleSearch          *GoogleSearch          `json:"googleSearch,omitempty"`
+	GoogleSearchRetrieval *GoogleSearchRetrieval `json:"googleSearchRetrieval,omitempty"`
+}
+
+// GoogleSearch enables simple Google Search grounding
+type GoogleSearch struct {
+	// Empty struct - presence enables Google Search
+}
+
+// GoogleSearchRetrieval enables Google Search with dynamic retrieval
+type GoogleSearchRetrieval struct {
+	DynamicRetrievalConfig *DynamicRetrievalConfig `json:"dynamicRetrievalConfig,omitempty"`
+}
+
+// DynamicRetrievalConfig configures dynamic retrieval behavior
+type DynamicRetrievalConfig struct {
+	Mode             string  `json:"mode,omitempty"`             // "MODE_DYNAMIC" or "MODE_UNSPECIFIED"
+	DynamicThreshold float64 `json:"dynamicThreshold,omitempty"` // 0.0 to 1.0
 }
 
 // FunctionDecl represents a function declaration

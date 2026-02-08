@@ -1,13 +1,18 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -388,7 +393,7 @@ func jsonRaw(s string) json.RawMessage {
 }
 
 // ExecuteBuiltinTool runs a built-in tool and returns the result
-func ExecuteBuiltinTool(ctx context.Context, workDir string, name string, args map[string]interface{}) (string, error) {
+func ExecuteBuiltinTool(ctx context.Context, workDir string, name string, args map[string]interface{}, settings *SettingsService) (string, error) {
 	switch name {
 	case "run_shell_command":
 		return execShellCommand(ctx, workDir, args)
@@ -407,9 +412,9 @@ func ExecuteBuiltinTool(ctx context.Context, workDir string, name string, args m
 	case "grep_search":
 		return execGrepSearch(ctx, workDir, args)
 	case "google_web_search":
-		return execGoogleWebSearch(ctx, args)
+		return execGoogleWebSearch(ctx, args, settings)
 	case "web_fetch":
-		return execWebFetch(ctx, args)
+		return execWebFetch(ctx, args, settings)
 	case "write_todos":
 		return execWriteTodos(workDir, args)
 	case "save_memory":
@@ -441,7 +446,15 @@ func execShellCommand(ctx context.Context, workDir string, args map[string]inter
 	timeoutCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(timeoutCtx, "bash", "-c", command)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		// Windows: use cmd /c for simple commands, powershell for complex ones
+		cmd = exec.CommandContext(timeoutCtx, "powershell", "-NoProfile", "-Command", command)
+	} else {
+		// Unix-like: use bash
+		cmd = exec.CommandContext(timeoutCtx, "bash", "-c", command)
+	}
+
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -622,41 +635,76 @@ func execGlob(workDir string, args map[string]interface{}) (string, error) {
 		dir = "."
 	}
 
-	// Use find command for recursive glob support
-	cmd := exec.Command("find", dir, "-name", pattern, "-not", "-path", "*/node_modules/*", "-not", "-path", "*/.git/*", "-not", "-path", "*/vendor/*")
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &bytes.Buffer{}
-
-	// Also try shell glob for ** patterns
-	if strings.Contains(pattern, "/") || strings.Contains(pattern, "**") {
-		// Use bash globbing
-		shellCmd := fmt.Sprintf("cd %q && find . -path %q -not -path '*/node_modules/*' -not -path '*/.git/*' 2>/dev/null | head -200", dir, pattern)
-		cmd = exec.Command("bash", "-c", shellCmd)
-		cmd.Stdout = &out
+	// Use cross-platform Go implementation instead of shell commands
+	var matches []string
+	excludeDirs := map[string]bool{
+		"node_modules": true,
+		".git":         true,
+		"vendor":       true,
+		"dist":         true,
+		"build":        true,
+		".next":        true,
+		".vscode":      true,
 	}
 
-	if err := cmd.Run(); err != nil {
-		// Try simple filepath.Glob as fallback
-		matches, err2 := filepath.Glob(filepath.Join(dir, pattern))
-		if err2 != nil {
+	// Handle ** patterns
+	if strings.Contains(pattern, "**") {
+		// Recursive glob: walk directory tree
+		parts := strings.Split(pattern, "**")
+		baseName := ""
+		if len(parts) > 1 {
+			baseName = strings.TrimPrefix(strings.TrimPrefix(parts[1], "/"), "\\")
+		}
+
+		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil // Skip errors
+			}
+
+			// Skip excluded directories
+			if info.IsDir() {
+				if excludeDirs[info.Name()] {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+
+			// Match pattern
+			if baseName == "" || strings.HasSuffix(path, baseName) {
+				relPath, _ := filepath.Rel(dir, path)
+				matches = append(matches, filepath.ToSlash(relPath))
+			}
+			if len(matches) >= 200 {
+				return filepath.SkipAll
+			}
+			return nil
+		})
+		if err != nil && err != filepath.SkipAll {
+			return "", fmt.Errorf("walk failed: %w", err)
+		}
+	} else {
+		// Simple glob without **
+		fullPattern := filepath.Join(dir, pattern)
+		m, err := filepath.Glob(fullPattern)
+		if err != nil {
 			return "", fmt.Errorf("glob failed: %w", err)
 		}
-		return strings.Join(matches, "\n"), nil
+		for _, match := range m {
+			relPath, _ := filepath.Rel(dir, match)
+			matches = append(matches, filepath.ToSlash(relPath))
+		}
 	}
 
-	result := strings.TrimSpace(out.String())
-	if result == "" {
+	if len(matches) == 0 {
 		return "(no matches found)", nil
 	}
 
-	lines := strings.Split(result, "\n")
-	if len(lines) > 200 {
-		lines = lines[:200]
-		result = strings.Join(lines, "\n") + "\n... (truncated, 200+ matches)"
+	if len(matches) > 200 {
+		matches = matches[:200]
+		return strings.Join(matches, "\n") + "\n... (truncated, 200+ matches)", nil
 	}
 
-	return result, nil
+	return strings.Join(matches, "\n"), nil
 }
 
 func execGrepSearch(ctx context.Context, workDir string, args map[string]interface{}) (string, error) {
@@ -673,34 +721,111 @@ func execGrepSearch(ctx context.Context, workDir string, args map[string]interfa
 		dir = "."
 	}
 
-	// Build grep command
-	grepArgs := []string{"-rn", "--color=never", "-m", "100"}
+	includePattern, _ := args["include"].(string)
 
-	if include, ok := args["include"].(string); ok && include != "" {
-		grepArgs = append(grepArgs, "--include="+include)
+	// Compile regex pattern
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return "", fmt.Errorf("invalid regex pattern: %w", err)
 	}
 
-	// Exclude common dirs
-	grepArgs = append(grepArgs, "--exclude-dir=node_modules", "--exclude-dir=.git", "--exclude-dir=vendor", "--exclude-dir=dist", "--exclude-dir=build")
-	grepArgs = append(grepArgs, "-E", pattern, dir)
+	// Cross-platform grep implementation
+	excludeDirs := map[string]bool{
+		"node_modules": true,
+		".git":         true,
+		"vendor":       true,
+		"dist":         true,
+		"build":        true,
+		".next":        true,
+	}
 
-	cmd := exec.CommandContext(ctx, "grep", grepArgs...)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &bytes.Buffer{}
-	cmd.Run() // grep returns exit 1 if no matches
+	var results []string
+	matchCount := 0
+	maxMatches := 500
 
-	result := strings.TrimSpace(out.String())
-	if result == "" {
+	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		// Skip excluded directories
+		if info.IsDir() {
+			if excludeDirs[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Check file pattern filter
+		if includePattern != "" {
+			matched, _ := filepath.Match(includePattern, info.Name())
+			if !matched {
+				return nil
+			}
+		}
+
+		// Skip binary files (simple heuristic)
+		if isBinaryFile(path) {
+			return nil
+		}
+
+		// Search in file
+		file, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
+		defer file.Close()
+
+		relPath, _ := filepath.Rel(dir, path)
+		scanner := bufio.NewScanner(file)
+		lineNum := 0
+
+		for scanner.Scan() {
+			lineNum++
+			line := scanner.Text()
+
+			if re.MatchString(line) {
+				results = append(results, fmt.Sprintf("%s:%d:%s", filepath.ToSlash(relPath), lineNum, line))
+				matchCount++
+
+				if matchCount >= maxMatches {
+					return filepath.SkipAll
+				}
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil && err != filepath.SkipAll {
+		return "", fmt.Errorf("search failed: %w", err)
+	}
+
+	if len(results) == 0 {
 		return "(no matches found)", nil
 	}
 
-	// Limit output
+	result := strings.Join(results, "\n")
 	if len(result) > 50000 {
 		result = result[:50000] + "\n... (output truncated)"
 	}
 
 	return result, nil
+}
+
+// isBinaryFile checks if a file is likely binary (simple heuristic)
+func isBinaryFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	textExts := map[string]bool{
+		".txt": true, ".md": true, ".go": true, ".js": true, ".ts": true,
+		".py": true, ".java": true, ".c": true, ".cpp": true, ".h": true,
+		".json": true, ".xml": true, ".yaml": true, ".yml": true, ".toml": true,
+		".html": true, ".css": true, ".scss": true, ".vue": true, ".jsx": true,
+		".tsx": true, ".rs": true, ".rb": true, ".php": true, ".sh": true,
+		".sql": true, ".proto": true, ".graphql": true, ".env": true,
+		".conf": true, ".cfg": true, ".ini": true, ".log": true,
+	}
+	return !textExts[ext] && ext != ""
 }
 
 func execSaveMemory(workDir string, args map[string]interface{}) (string, error) {
@@ -837,83 +962,232 @@ func execReadManyFiles(workDir string, args map[string]interface{}) (string, err
 	return fmt.Sprintf("Read %d files:\n\n%s", fileCount, sb.String()), nil
 }
 
-func execGoogleWebSearch(ctx context.Context, args map[string]interface{}) (string, error) {
+func execGoogleWebSearch(ctx context.Context, args map[string]interface{}, settings *SettingsService) (string, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
 		return "", fmt.Errorf("query is required")
 	}
 
-	// Use curl + HTML parsing via a simple approach
-	escapedQuery := strings.ReplaceAll(query, " ", "+")
-	escapedQuery = strings.ReplaceAll(escapedQuery, "&", "%26")
+	// Get API client
+	client, err := settings.EnsureAuth(ctx)
+	if err != nil {
+		return "", fmt.Errorf("authentication failed: %w", err)
+	}
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	// Use ddgr (DuckDuckGo) or curl Google
-	cmd := exec.CommandContext(timeoutCtx, "bash", "-c",
-		fmt.Sprintf(`curl -sL "https://html.duckduckgo.com/html/?q=%s" 2>/dev/null | grep -oP '(?<=<a rel="nofollow" class="result__a" href=")[^"]+' | head -10`, escapedQuery))
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &bytes.Buffer{}
-	cmd.Run()
-
-	result := strings.TrimSpace(out.String())
-	if result == "" {
-		// Fallback: use search via lynx or w3m if available
-		cmd2 := exec.CommandContext(timeoutCtx, "bash", "-c",
-			fmt.Sprintf(`curl -sL -A "Mozilla/5.0" "https://www.google.com/search?q=%s&num=10" 2>/dev/null | sed 's/<[^>]*>//g' | grep -v "^$" | head -50`, escapedQuery))
-		var out2 bytes.Buffer
-		cmd2.Stdout = &out2
-		cmd2.Run()
-		result = strings.TrimSpace(out2.String())
+	// Build request with Google Search Grounding
+	req := &api.GenerateRequest{
+		Model:   settings.GetDefaultModel(),
+		Project: settings.GetProjectID(),
+		Request: api.InnerRequest{
+			Contents: []api.Content{
+				{
+					Role: "user",
+					Parts: []api.Part{
+						{Text: query},
+					},
+				},
+			},
+			Tools: []api.Tool{
+				{
+					GoogleSearchRetrieval: &api.GoogleSearchRetrieval{
+						DynamicRetrievalConfig: &api.DynamicRetrievalConfig{
+							Mode:             "MODE_DYNAMIC",
+							DynamicThreshold: 0.3,
+						},
+					},
+				},
+			},
+		},
 	}
 
-	if result == "" {
-		return "No search results found. Try a different query.", nil
+	// Send request to Gemini API with Google Search Grounding
+	resp, err := client.Generate(timeoutCtx, req)
+	if err != nil {
+		return "", fmt.Errorf("Google Search failed: %w", err)
 	}
 
-	if len(result) > 20000 {
-		result = result[:20000] + "\n... (truncated)"
+	// Extract text from response
+	if len(resp.Response.Candidates) == 0 {
+		return "No search results found.", nil
 	}
 
-	return fmt.Sprintf("Search results for: %s\n\n%s", query, result), nil
+	var resultText strings.Builder
+	for _, part := range resp.Response.Candidates[0].Content.Parts {
+		if part.Text != "" {
+			resultText.WriteString(part.Text)
+		}
+	}
+
+	if resultText.Len() == 0 {
+		return "No search results found.", nil
+	}
+
+	return resultText.String(), nil
 }
 
-func execWebFetch(ctx context.Context, args map[string]interface{}) (string, error) {
-	url, _ := args["url"].(string)
-	if url == "" {
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func execWebFetch(ctx context.Context, args map[string]interface{}, settings *SettingsService) (string, error) {
+	urlStr, _ := args["url"].(string)
+	if urlStr == "" {
 		return "", fmt.Errorf("url is required")
 	}
 
-	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+	if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
 		return "", fmt.Errorf("url must start with http:// or https://")
 	}
 
+	// Get prompt parameter (optional - for specific instructions)
+	prompt, _ := args["prompt"].(string)
+	if prompt == "" {
+		prompt = fmt.Sprintf("Please summarize the content from %s", urlStr)
+	} else if !strings.Contains(prompt, urlStr) {
+		prompt = fmt.Sprintf("%s\n\nURL: %s", prompt, urlStr)
+	}
+
+	// Try using Gemini API with Grounding first
+	client, err := settings.EnsureAuth(ctx)
+	if err == nil {
+		timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+
+		req := &api.GenerateRequest{
+			Model:   settings.GetDefaultModel(),
+			Project: settings.GetProjectID(),
+			Request: api.InnerRequest{
+				Contents: []api.Content{
+					{
+						Role: "user",
+						Parts: []api.Part{
+							{Text: prompt},
+						},
+					},
+				},
+				Tools: []api.Tool{
+					{
+						GoogleSearchRetrieval: &api.GoogleSearchRetrieval{
+							DynamicRetrievalConfig: &api.DynamicRetrievalConfig{
+								Mode:             "MODE_DYNAMIC",
+								DynamicThreshold: 0.3,
+							},
+						},
+					},
+				},
+			},
+		}
+
+		resp, err := client.Generate(timeoutCtx, req)
+		if err == nil && len(resp.Response.Candidates) > 0 {
+			var resultText strings.Builder
+			for _, part := range resp.Response.Candidates[0].Content.Parts {
+				if part.Text != "" {
+					resultText.WriteString(part.Text)
+				}
+			}
+			if resultText.Len() > 0 {
+				return resultText.String(), nil
+			}
+		}
+		// If API method fails, fall back to local fetch
+	}
+
+	// Fallback: Local HTTP fetch
+	return execWebFetchLocal(ctx, urlStr)
+}
+
+func execWebFetchLocal(ctx context.Context, urlStr string) (string, error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Fetch URL and convert to plain text
-	cmd := exec.CommandContext(timeoutCtx, "bash", "-c",
-		fmt.Sprintf(`curl -sL -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" --max-time 25 %q 2>/dev/null | sed 's/<script[^>]*>.*<\/script>//g; s/<style[^>]*>.*<\/style>//g; s/<[^>]*>//g; s/&nbsp;/ /g; s/&amp;/\&/g; s/&lt;/</g; s/&gt;/>/g; s/&quot;/"/g' | sed '/^$/d' | head -500`, url))
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &bytes.Buffer{}
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to fetch URL: %w", err)
+	// Cross-platform HTTP request
+	req, err := http.NewRequestWithContext(timeoutCtx, "GET", urlStr, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
-	result := strings.TrimSpace(out.String())
-	if result == "" {
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+	httpClient := &http.Client{
+		Timeout: 25 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch URL: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 500*1024)) // Limit to 500KB
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Simple HTML to text conversion
+	text := stripHTMLTags(string(body))
+	text = htmlDecode(text)
+	text = strings.TrimSpace(text)
+
+	if text == "" {
 		return "(empty response from URL)", nil
 	}
 
-	if len(result) > 100000 {
-		result = result[:100000] + "\n... (truncated)"
+	if len(text) > 100000 {
+		text = text[:100000] + "\n... (truncated)"
 	}
 
-	return fmt.Sprintf("Content from %s:\n\n%s", url, result), nil
+	return fmt.Sprintf("Content from %s:\n\n%s", urlStr, text), nil
+}
+
+func stripHTMLTags(html string) string {
+	// Remove script and style tags
+	scriptRe := regexp.MustCompile(`(?i)<script[^>]*>.*?</script>`)
+	html = scriptRe.ReplaceAllString(html, "")
+
+	styleRe := regexp.MustCompile(`(?i)<style[^>]*>.*?</style>`)
+	html = styleRe.ReplaceAllString(html, "")
+
+	// Remove all HTML tags
+	tagRe := regexp.MustCompile(`<[^>]*>`)
+	text := tagRe.ReplaceAllString(html, " ")
+
+	// Remove extra whitespace
+	spaceRe := regexp.MustCompile(`\s+`)
+	text = spaceRe.ReplaceAllString(text, " ")
+
+	return text
+}
+
+func htmlDecode(s string) string {
+	replacements := map[string]string{
+		"&nbsp;":  " ",
+		"&amp;":   "&",
+		"&lt;":    "<",
+		"&gt;":    ">",
+		"&quot;":  "\"",
+		"&#39;":   "'",
+		"&apos;":  "'",
+		"&ndash;": "-",
+		"&mdash;": "—",
+	}
+
+	for entity, char := range replacements {
+		s = strings.ReplaceAll(s, entity, char)
+	}
+	return s
 }
 
 func execActivateSkill(workDir string, args map[string]interface{}) (string, error) {

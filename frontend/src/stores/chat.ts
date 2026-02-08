@@ -124,19 +124,107 @@ export const useChatStore = defineStore('chat', () => {
     return false
   }
 
+  // Detect MIME type from file extension
+  function getMimeTypeFromExtension(filename: string): string {
+    const ext = filename.toLowerCase().split('.').pop()
+    const mimeMap: Record<string, string> = {
+      // Text formats
+      'md': 'text/markdown',
+      'markdown': 'text/markdown',
+      'txt': 'text/plain',
+      'json': 'application/json',
+      'xml': 'text/xml',
+      'csv': 'text/csv',
+      'yaml': 'text/yaml',
+      'yml': 'text/yaml',
+      'log': 'text/plain',
+      'html': 'text/html',
+      'htm': 'text/html',
+      'css': 'text/css',
+      'js': 'text/javascript',
+      'ts': 'text/x-typescript',
+      'py': 'text/x-python',
+      'java': 'text/x-java',
+      'c': 'text/x-c',
+      'cpp': 'text/x-c++',
+      'go': 'text/x-go',
+      'rs': 'text/x-rust',
+      // Images
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'png': 'image/png',
+      'gif': 'image/gif',
+      'webp': 'image/webp',
+      'bmp': 'image/bmp',
+      'svg': 'image/svg+xml',
+      // Documents
+      'pdf': 'application/pdf',
+      'doc': 'application/msword',
+      'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      // Audio
+      'mp3': 'audio/mp3',
+      'wav': 'audio/wav',
+      'ogg': 'audio/ogg',
+      'flac': 'audio/flac',
+      'aac': 'audio/aac',
+      // Video
+      'mp4': 'video/mp4',
+      'webm': 'video/webm',
+      'mov': 'video/mov',
+      'avi': 'video/avi',
+    }
+    return mimeMap[ext || ''] || 'text/plain'
+  }
+
   async function send(text: string) {
-    if (!text.trim() || isStreaming.value) return
+    return sendWithFiles(text, [])
+  }
+
+  async function sendWithFiles(text: string, files: File[]) {
+    if ((!text.trim() && files.length === 0) || isStreaming.value) return
     error.value = null
 
-    // Handle slash commands locally
-    if (text.trim().startsWith('/')) {
+    // Handle slash commands locally (only if no files attached)
+    if (files.length === 0 && text.trim().startsWith('/')) {
       if (await handleSlashCommand(text)) return
     }
 
     isStreaming.value = true
     streamingText.value = ''
     try {
-      await SendMessage(text)
+      if (files.length === 0) {
+        await SendMessage(text)
+      } else {
+        // Save files to temp location and get paths
+        const { SaveFilesToTemp } = await import('../../wailsjs/go/service/ChatService')
+
+        // Read files as base64
+        const fileData = await Promise.all(files.map(async (file) => {
+          const buffer = await file.arrayBuffer()
+          const bytes = new Uint8Array(buffer)
+          const binary = Array.from(bytes).map(b => String.fromCharCode(b)).join('')
+          const base64 = btoa(binary)
+
+          // Use browser's MIME type if available and valid, otherwise detect from extension
+          let mimeType = file.type
+          if (!mimeType || mimeType === 'application/octet-stream' || mimeType === '') {
+            mimeType = getMimeTypeFromExtension(file.name)
+          }
+
+          return {
+            filename: file.name,
+            mimeType: mimeType,
+            data: base64
+          }
+        }))
+
+        // Save files and get temp paths
+        const attachedFiles = await SaveFilesToTemp(fileData)
+
+        // Send message with file paths
+        const { SendMessageWithFiles } = await import('../../wailsjs/go/service/ChatService')
+        await SendMessageWithFiles(text, attachedFiles)
+      }
     } catch (e) {
       error.value = String(e)
       isStreaming.value = false
@@ -191,6 +279,7 @@ export const useChatStore = defineStore('chat', () => {
     fetchWorkDir,
     changeWorkDir,
     send,
+    sendWithFiles,
     stop,
     clear,
     loadMessages,
