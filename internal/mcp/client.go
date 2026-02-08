@@ -13,6 +13,8 @@ import (
 	"os/exec"
 	"sync"
 	"sync/atomic"
+
+	"github.com/tomohiro-owada/gmn-gui/internal/envutil"
 )
 
 // Client is an MCP client using stdio transport
@@ -67,8 +69,8 @@ func NewClient(command string, args []string, env map[string]string, cwd string)
 		cmd.Dir = cwd
 	}
 
-	// Set environment
-	cmd.Env = os.Environ()
+	// Set environment with extended PATH for GUI apps
+	cmd.Env = envutil.ShellEnv()
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
 	}
@@ -273,3 +275,4 @@ func (c *Client) notify(method string, params interface{}) error {
 
 	return nil
 }
+

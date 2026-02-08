@@ -41,17 +41,65 @@ jobs:
           name: gmn-gui-darwin-arm64
           path: gmn-gui-darwin-arm64.zip
 
+  build-windows-amd64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Build
+        run: wails build -clean -nsis
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gmn-gui-windows-amd64
+          path: build/bin/gmn-gui.exe
+
+      - name: Upload Installer artifact
+        uses: actions/upload-artifact@v4
+        if: hashFiles('build/bin/gmn-gui-amd64-installer.exe') != ''
+        with:
+          name: gmn-gui-windows-amd64-installer
+          path: build/bin/gmn-gui-amd64-installer.exe
+
   release:
-    needs: build-macos-arm64
+    needs: [build-macos-arm64, build-windows-amd64]
     runs-on: ubuntu-latest
     steps:
-      - name: Download artifact
+      - name: Download macOS artifact
         uses: actions/download-artifact@v4
         with:
           name: gmn-gui-darwin-arm64
 
+      - name: Download Windows EXE artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gmn-gui-windows-amd64
+
+      - name: Download Windows Installer artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: gmn-gui-windows-amd64-installer
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: gmn-gui-darwin-arm64.zip
+          files: |
+            gmn-gui-darwin-arm64.zip
+            gmn-gui.exe
+            gmn-gui-amd64-installer.exe
           generate_release_notes: true

@@ -29,15 +29,20 @@
 
 ### 動作要件
 
-- macOS 12 以降（Apple Silicon）
+- macOS 12 以降（Apple Silicon）または Windows 10 以降（64-bit）
 - [Gemini Code Assist](https://codeassist.google/) のアカウント（Google アカウントで無料利用可能）
 
 ### インストール
 
-#### リリースビルドを使う場合
+#### ダウンロード
 
-1. [Releases](https://github.com/tomohiro-owada/gmn-gui/releases) から `gmn-gui-darwin-arm64.zip` をダウンロード
-2. ZIP を展開して `gmn-gui.app` を `/Applications` に移動
+[Releases ページ](https://github.com/tomohiro-owada/gmn-gui/releases/latest) から OS に合ったファイルをダウンロードしてください。
+
+| OS | ファイル | 説明 |
+|----|---------|------|
+| macOS (Apple Silicon) | `gmn-gui-darwin-arm64.zip` | ZIP を展開して `/Applications` に移動 |
+| Windows | `gmn-gui.exe` | そのまま実行可能 |
+| Windows | `gmn-gui-amd64-installer.exe` | インストーラー付き |
 
 #### macOS Gatekeeper の警告について
 
@@ -72,7 +77,7 @@ cd gmn-gui
 wails build
 ```
 
-ビルド後、`build/bin/gmn-gui.app` が生成されます。
+ビルド後、`build/bin/gmn-gui.app`（macOS）または `build/bin/gmn-gui.exe`（Windows）が生成されます。
 
 ### 使い方
 
@@ -201,15 +206,20 @@ Apache License 2.0
 
 ### Requirements
 
-- macOS 12+ (Apple Silicon)
+- macOS 12+ (Apple Silicon) or Windows 10+ (64-bit)
 - [Gemini Code Assist](https://codeassist.google/) account (free with a Google account)
 
 ### Installation
 
-#### Using a release build
+#### Download
 
-1. Download `gmn-gui-darwin-arm64.zip` from [Releases](https://github.com/tomohiro-owada/gmn-gui/releases)
-2. Unzip and move `gmn-gui.app` to `/Applications`
+Download the appropriate file for your OS from the [Releases page](https://github.com/tomohiro-owada/gmn-gui/releases/latest).
+
+| OS | File | Description |
+|----|------|-------------|
+| macOS (Apple Silicon) | `gmn-gui-darwin-arm64.zip` | Unzip and move to `/Applications` |
+| Windows | `gmn-gui.exe` | Portable executable |
+| Windows | `gmn-gui-amd64-installer.exe` | Installer with setup wizard |
 
 #### macOS Gatekeeper warning
 
@@ -244,7 +254,7 @@ cd gmn-gui
 wails build
 ```
 
-The built app will be at `build/bin/gmn-gui.app`.
+The built app will be at `build/bin/gmn-gui.app` (macOS) or `build/bin/gmn-gui.exe` (Windows).
 
 ### Usage
 

@@ -121,26 +121,16 @@ type GenerationConfig struct {
 
 // Tool represents a tool definition
 type Tool struct {
-	FunctionDeclarations  []FunctionDecl         `json:"functionDeclarations,omitempty"`
-	GoogleSearch          *GoogleSearch          `json:"googleSearch,omitempty"`
-	GoogleSearchRetrieval *GoogleSearchRetrieval `json:"googleSearchRetrieval,omitempty"`
+	FunctionDeclarations []FunctionDecl `json:"functionDeclarations,omitempty"`
+	GoogleSearch         *GoogleSearch  `json:"googleSearch,omitempty"`
+	UrlContext           *UrlContext    `json:"urlContext,omitempty"`
 }
 
-// GoogleSearch enables simple Google Search grounding
-type GoogleSearch struct {
-	// Empty struct - presence enables Google Search
-}
+// GoogleSearch enables Google Search grounding
+type GoogleSearch struct{}
 
-// GoogleSearchRetrieval enables Google Search with dynamic retrieval
-type GoogleSearchRetrieval struct {
-	DynamicRetrievalConfig *DynamicRetrievalConfig `json:"dynamicRetrievalConfig,omitempty"`
-}
-
-// DynamicRetrievalConfig configures dynamic retrieval behavior
-type DynamicRetrievalConfig struct {
-	Mode             string  `json:"mode,omitempty"`             // "MODE_DYNAMIC" or "MODE_UNSPECIFIED"
-	DynamicThreshold float64 `json:"dynamicThreshold,omitempty"` // 0.0 to 1.0
-}
+// UrlContext enables URL context grounding (for web fetch)
+type UrlContext struct{}
 
 // FunctionDecl represents a function declaration
 type FunctionDecl struct {

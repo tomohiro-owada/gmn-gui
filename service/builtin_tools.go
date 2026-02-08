@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/tomohiro-owada/gmn-gui/internal/api"
+	"github.com/tomohiro-owada/gmn-gui/internal/envutil"
 )
 
 // builtinToolNames lists all built-in tool names for routing
@@ -458,6 +459,7 @@ func execShellCommand(ctx context.Context, workDir string, args map[string]inter
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	cmd.Env = envutil.ShellEnv()
 
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -813,6 +815,12 @@ func execGrepSearch(ctx context.Context, workDir string, args map[string]interfa
 	return result, nil
 }
 
+// matchGlobSuffix matches a filename against a glob suffix (e.g. "*.ts", "*.go")
+func matchGlobSuffix(name, pattern string) bool {
+	matched, _ := filepath.Match(pattern, name)
+	return matched
+}
+
 // isBinaryFile checks if a file is likely binary (simple heuristic)
 func isBinaryFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
@@ -890,27 +898,52 @@ func execReadManyFiles(workDir string, args map[string]interface{}) (string, err
 	const maxTotalSize = 500000
 	const maxFiles = 100
 
+	excludeDirs := map[string]bool{
+		"node_modules": true,
+		".git":         true,
+		"vendor":       true,
+	}
+
 	for _, pat := range includeRaw {
 		pattern, ok := pat.(string)
 		if !ok {
 			continue
 		}
 
-		// Use find + glob
-		shellCmd := fmt.Sprintf("cd %q && find . -path %q -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/vendor/*' -type f 2>/dev/null | head -200",
-			dir, pattern)
-		cmd := exec.Command("bash", "-c", shellCmd)
-		var out bytes.Buffer
-		cmd.Stdout = &out
-		cmd.Run()
-
-		matches := strings.Split(strings.TrimSpace(out.String()), "\n")
-		if len(matches) == 1 && matches[0] == "" {
-			// Try filepath.Glob as fallback
+		// Cross-platform: use filepath.Walk + glob matching instead of shell find
+		var matches []string
+		if strings.Contains(pattern, "**") {
+			// Recursive pattern: walk directory tree
+			suffix := ""
+			if parts := strings.SplitN(pattern, "**", 2); len(parts) > 1 {
+				suffix = strings.TrimPrefix(strings.TrimPrefix(parts[1], "/"), "\\")
+			}
+			filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return nil
+				}
+				if info.IsDir() {
+					if excludeDirs[info.Name()] {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+				if suffix == "" || matchGlobSuffix(info.Name(), suffix) {
+					matches = append(matches, path)
+				}
+				if len(matches) >= 200 {
+					return filepath.SkipAll
+				}
+				return nil
+			})
+		} else {
+			// Simple glob
 			globMatches, _ := filepath.Glob(filepath.Join(dir, pattern))
-			matches = nil
 			for _, m := range globMatches {
-				matches = append(matches, m)
+				info, err := os.Stat(m)
+				if err == nil && !info.IsDir() {
+					matches = append(matches, m)
+				}
 			}
 		}
 
@@ -977,9 +1010,9 @@ func execGoogleWebSearch(ctx context.Context, args map[string]interface{}, setti
 	timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	// Build request with Google Search Grounding
+	// Same as official Gemini CLI: model "gemini-2.5-flash" + googleSearch tool
 	req := &api.GenerateRequest{
-		Model:   settings.GetDefaultModel(),
+		Model:   "gemini-2.5-flash",
 		Project: settings.GetProjectID(),
 		Request: api.InnerRequest{
 			Contents: []api.Content{
@@ -992,18 +1025,12 @@ func execGoogleWebSearch(ctx context.Context, args map[string]interface{}, setti
 			},
 			Tools: []api.Tool{
 				{
-					GoogleSearchRetrieval: &api.GoogleSearchRetrieval{
-						DynamicRetrievalConfig: &api.DynamicRetrievalConfig{
-							Mode:             "MODE_DYNAMIC",
-							DynamicThreshold: 0.3,
-						},
-					},
+					GoogleSearch: &api.GoogleSearch{},
 				},
 			},
 		},
 	}
 
-	// Send request to Gemini API with Google Search Grounding
 	resp, err := client.Generate(timeoutCtx, req)
 	if err != nil {
 		return "", fmt.Errorf("Google Search failed: %w", err)
@@ -1053,14 +1080,14 @@ func execWebFetch(ctx context.Context, args map[string]interface{}, settings *Se
 		prompt = fmt.Sprintf("%s\n\nURL: %s", prompt, urlStr)
 	}
 
-	// Try using Gemini API with Grounding first
+	// Same as official Gemini CLI: model "gemini-2.5-flash" + urlContext tool
 	client, err := settings.EnsureAuth(ctx)
 	if err == nil {
 		timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 
 		req := &api.GenerateRequest{
-			Model:   settings.GetDefaultModel(),
+			Model:   "gemini-2.5-flash",
 			Project: settings.GetProjectID(),
 			Request: api.InnerRequest{
 				Contents: []api.Content{
@@ -1073,12 +1100,7 @@ func execWebFetch(ctx context.Context, args map[string]interface{}, settings *Se
 				},
 				Tools: []api.Tool{
 					{
-						GoogleSearchRetrieval: &api.GoogleSearchRetrieval{
-							DynamicRetrievalConfig: &api.DynamicRetrievalConfig{
-								Mode:             "MODE_DYNAMIC",
-								DynamicThreshold: 0.3,
-							},
-						},
+						UrlContext: &api.UrlContext{},
 					},
 				},
 			},
